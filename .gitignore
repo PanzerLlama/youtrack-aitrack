@@ -1,5 +1,48 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg-info/
+*.egg
+build/
+dist/
+.eggs/
 
-# Beads / Dolt files (added by bd init)
+# Virtual environments
+.venv/
+venv/
+env/
+ENV/
+
+# Tooling caches
+.ruff_cache/
+.mypy_cache/
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+.tox/
+
+# Editors / IDEs
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Secrets and local state
+.env
+.env.local
+.env.*.local
+.youtrack-aitrack-state/
+
+# Beads / Dolt (managed by bd init)
 .dolt/
 *.db
 .beads-credential-key
+/.beads/
+/.claude/

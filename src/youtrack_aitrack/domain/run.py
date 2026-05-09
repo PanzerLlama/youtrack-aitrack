@@ -5,7 +5,7 @@ from __future__ import annotations
 from enum import StrEnum
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class RunState(StrEnum):
@@ -21,5 +21,14 @@ class ActionResult(BaseModel):
     output: dict[str, Any] | None = None
     error: str | None = None
     duration_ms: int | None = None
+
+    model_config = ConfigDict(frozen=True)
+
+
+class RunReport(BaseModel):
+    workflow_name: str
+    state: RunState
+    action_results: list[ActionResult] = Field(default_factory=list)
+    hook_results: list[ActionResult] = Field(default_factory=list)
 
     model_config = ConfigDict(frozen=True)

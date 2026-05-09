@@ -1,0 +1,246 @@
+"""Tests for WorkflowEngine — trigger matching, action graph, hooks, lifecycle."""
+
+from __future__ import annotations
+
+import asyncio
+from datetime import UTC, datetime
+from typing import Any, Literal, cast
+
+from pydantic import PrivateAttr
+
+from youtrack_aitrack.domain.action import ActionSpec
+from youtrack_aitrack.domain.context import Context
+from youtrack_aitrack.domain.event import IssueEvent
+from youtrack_aitrack.domain.run import ActionResult, RunState
+from youtrack_aitrack.domain.triggers.manual import ManualTrigger
+from youtrack_aitrack.domain.triggers.status_change import StatusChangeTrigger
+from youtrack_aitrack.domain.workflow import Workflow
+from youtrack_aitrack.engine import WorkflowEngine
+
+
+def _manual_event() -> IssueEvent:
+    return IssueEvent(
+        issue_id="DEMO-1",
+        project="DEMO",
+        event_kind="manual",
+        timestamp=datetime(2026, 5, 9, tzinfo=UTC),
+    )
+
+
+def _status_change_event(to_state: str = "Ready for testing") -> IssueEvent:
+    return IssueEvent(
+        issue_id="DEMO-1",
+        project="DEMO",
+        event_kind="status_change",
+        from_state="Open",
+        to_state=to_state,
+        timestamp=datetime(2026, 5, 9, tzinfo=UTC),
+    )
+
+
+# --- Fake actions used as building blocks ---
+
+
+class _FakeAction(ActionSpec):
+    """Records execute() calls and returns a configured success/failure."""
+
+    type: Literal["_fake"] = "_fake"
+    succeed: bool = True
+    record_key: str = ""
+
+    _calls: list[Context] = PrivateAttr(default_factory=list)
+    _gate: asyncio.Event | None = PrivateAttr(default=None)
+    _release_after: asyncio.Event | None = PrivateAttr(default=None)
+
+    def __init__(
+        self,
+        *,
+        gate: asyncio.Event | None = None,
+        release_after: asyncio.Event | None = None,
+        **data: Any,
+    ) -> None:
+        super().__init__(**data)
+        self._gate = gate
+        self._release_after = release_after
+
+    @property
+    def calls(self) -> list[Context]:
+        return self._calls
+
+    async def execute(self, ctx: Context) -> ActionResult:
+        if self._gate is not None:
+            await self._gate.wait()
+        self._calls.append(ctx)
+        if self._release_after is not None:
+            self._release_after.set()
+        if not self.succeed:
+            return ActionResult(action_id=self.id, success=False, error="boom")
+        return ActionResult(
+            action_id=self.id,
+            success=True,
+            output={"key": self.record_key or self.id},
+        )
+
+
+def _wf(
+    *,
+    actions: list[ActionSpec],
+    on_success: list[ActionSpec] | None = None,
+    on_failure: list[ActionSpec] | None = None,
+    name: str = "wf",
+    trigger: Any = None,
+) -> Workflow:
+    return Workflow(
+        name=name,
+        trigger=trigger or ManualTrigger(),
+        actions=actions,
+        on_success=on_success or [],
+        on_failure=on_failure or [],
+    )
+
+
+# --- dispatch / trigger matching ---
+
+
+async def test_dispatch_returns_empty_when_no_match() -> None:
+    wf = _wf(
+        actions=[_FakeAction(id="a1")],
+        trigger=StatusChangeTrigger(to_state="Done"),
+    )
+    reports = await WorkflowEngine().dispatch(_status_change_event("Other"), [wf])
+    assert reports == []
+
+
+async def test_dispatch_runs_each_matching_workflow() -> None:
+    a = _FakeAction(id="a")
+    b = _FakeAction(id="b")
+    wf1 = _wf(name="w1", actions=[a])
+    wf2 = _wf(name="w2", actions=[b])
+    reports = await WorkflowEngine().dispatch(_manual_event(), [wf1, wf2])
+    names = sorted(r.workflow_name for r in reports)
+    assert names == ["w1", "w2"]
+    assert all(r.state is RunState.DONE for r in reports)
+
+
+# --- single-action e2e ---
+
+
+async def test_single_action_workflow_runs_to_done() -> None:
+    a = _FakeAction(id="a1")
+    wf = _wf(actions=[a])
+    [report] = await WorkflowEngine().dispatch(_manual_event(), [wf])
+    assert report.state is RunState.DONE
+    assert [r.action_id for r in report.action_results] == ["a1"]
+    assert report.action_results[0].output == {"key": "a1"}
+
+
+# --- depends_on respected ---
+
+
+async def test_depends_on_orders_execution() -> None:
+    parent = _FakeAction(id="parent")
+    child = _FakeAction(id="child", depends_on=["parent"])
+    wf = _wf(actions=[parent, child])
+    [report] = await WorkflowEngine().dispatch(_manual_event(), [wf])
+    assert report.state is RunState.DONE
+    # The child was scheduled with parent's result already in ctx.action_outputs.
+    child_ctx = cast(_FakeAction, child).calls[0]
+    assert "parent" in child_ctx.action_outputs
+
+
+# --- parallel actions execute concurrently ---
+
+
+async def test_independent_actions_run_in_parallel() -> None:
+    gate_a = asyncio.Event()
+    gate_b = asyncio.Event()
+    started_a = asyncio.Event()
+    started_b = asyncio.Event()
+
+    a = _FakeAction(id="a", gate=gate_a, release_after=started_a)
+    b = _FakeAction(id="b", gate=gate_b, release_after=started_b)
+    wf = _wf(actions=[a, b])
+
+    async def driver() -> None:
+        # Release each gate only once both actions are observed waiting.
+        gate_a.set()
+        await started_a.wait()
+        gate_b.set()
+        await started_b.wait()
+
+    drive = asyncio.create_task(driver())
+    [report] = await WorkflowEngine().dispatch(_manual_event(), [wf])
+    await drive
+    assert report.state is RunState.DONE
+    # Both actions must have executed (parallel scheduling did not block on the other's gate).
+    assert {r.action_id for r in report.action_results} == {"a", "b"}
+
+
+# --- failure mid-graph triggers on_failure ---
+
+
+async def test_failure_runs_on_failure_hooks() -> None:
+    fail = _FakeAction(id="fail", succeed=False)
+    skipped = _FakeAction(id="skipped", depends_on=["fail"])
+    fail_hook = _FakeAction(id="cleanup")
+    success_hook = _FakeAction(id="celebrate")
+    wf = _wf(
+        actions=[fail, skipped],
+        on_success=[success_hook],
+        on_failure=[fail_hook],
+    )
+    [report] = await WorkflowEngine().dispatch(_manual_event(), [wf])
+    assert report.state is RunState.FAILED
+    action_ids = {r.action_id for r in report.action_results}
+    assert action_ids == {"fail"}
+    assert [r.action_id for r in report.hook_results] == ["cleanup"]
+    assert cast(_FakeAction, skipped).calls == []
+    assert cast(_FakeAction, success_hook).calls == []
+
+
+async def test_action_raising_exception_marked_failed() -> None:
+    class _Boom(ActionSpec):
+        type: Literal["_boom"] = "_boom"
+
+        async def execute(self, ctx: Context) -> ActionResult:
+            raise RuntimeError("kapow")
+
+    wf = _wf(actions=[_Boom(id="x")], on_failure=[_FakeAction(id="cleanup")])
+    [report] = await WorkflowEngine().dispatch(_manual_event(), [wf])
+    assert report.state is RunState.FAILED
+    [result] = report.action_results
+    assert result.success is False
+    assert result.error is not None and "kapow" in result.error
+    assert [r.action_id for r in report.hook_results] == ["cleanup"]
+
+
+# --- success runs on_success hooks ---
+
+
+async def test_success_runs_on_success_hooks() -> None:
+    a = _FakeAction(id="a")
+    success_hook = _FakeAction(id="celebrate")
+    fail_hook = _FakeAction(id="cleanup")
+    wf = _wf(
+        actions=[a],
+        on_success=[success_hook],
+        on_failure=[fail_hook],
+    )
+    [report] = await WorkflowEngine().dispatch(_manual_event(), [wf])
+    assert report.state is RunState.DONE
+    assert [r.action_id for r in report.hook_results] == ["celebrate"]
+    assert cast(_FakeAction, fail_hook).calls == []
+
+
+# --- per-action results captured in Context ---
+
+
+async def test_downstream_action_sees_upstream_results() -> None:
+    parent = _FakeAction(id="parent", record_key="parent-output")
+    child = _FakeAction(id="child", depends_on=["parent"])
+    wf = _wf(actions=[parent, child])
+    await WorkflowEngine().dispatch(_manual_event(), [wf])
+    child_ctx = cast(_FakeAction, child).calls[0]
+    parent_result = child_ctx.action_outputs["parent"]
+    assert parent_result.success is True
+    assert parent_result.output == {"key": "parent-output"}

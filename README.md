@@ -26,7 +26,7 @@ Requires Python 3.12+ and [uv](https://docs.astral.sh/uv/).
 
 ```bash
 # Alpha install directly from git
-uv tool install --from git+https://github.com/lechuszczynski/youtrack-aitrack youtrack-aitrack
+uv tool install --from git+https://github.com/PanzerLlama/youtrack-aitrack youtrack-aitrack
 
 # Verify the install
 youtrack-aitrack --help

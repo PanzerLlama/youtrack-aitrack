@@ -1,0 +1,31 @@
+name: ready-for-testing-audit
+description: Run three AI reports when an issue moves to Ready for testing.
+trigger:
+  type: status_change
+  to_state: Ready for testing
+  from_state: "*"
+actions:
+  - id: security_audit
+    type: ai_report
+    inputs: [git_diff, task_meta]
+    output:
+      kind: custom_field
+      name: Security Audit
+  - id: pages_changed
+    type: ai_report
+    inputs: [git_diff, route_index]
+    output:
+      kind: custom_field
+      name: Pages Changed
+  - id: qa_plan
+    type: ai_report
+    depends_on: [pages_changed]
+    output:
+      kind: custom_field
+      name: QA Plan
+on_success:
+  - id: status_done
+    type: set_field
+on_failure:
+  - id: status_failed
+    type: set_field

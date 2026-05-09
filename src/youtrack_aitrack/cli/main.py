@@ -1,4 +1,5 @@
 """CLI entry point for youtrack-aitrack."""
+
 from __future__ import annotations
 
 import typer

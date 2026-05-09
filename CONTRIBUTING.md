@@ -45,6 +45,20 @@ about scope and motivation.
    issues and PRs.
 4. Run the quality gates locally before pushing — see below.
 
+## Quickstart on a fresh checkout
+
+After cloning, run the bootstrap script once:
+
+```bash
+./scripts/setup-dev.sh
+```
+
+This installs `uv` (via the official Astral installer if missing), installs
+the project Python and dependencies, wires `core.hooksPath` to the
+bd-managed pre-commit chain, verifies the hook integrity, and runs every
+CI gate locally as a smoke test. Re-running it is safe — each step is
+idempotent.
+
 ## Quality gates
 
 ```bash
@@ -56,7 +70,8 @@ uv run mypy src                             # static types (strict)
 uv run pre-commit run --all-files           # everything pre-commit enforces
 ```
 
-All four pass on every commit. CI (when wired) runs the same set.
+All four pass on every commit. CI runs the same set on every PR and push to
+`main` (see `.github/workflows/ci.yml`).
 
 ## Adding a trigger or action type
 

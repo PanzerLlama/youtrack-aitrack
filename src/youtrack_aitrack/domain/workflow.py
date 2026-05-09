@@ -37,4 +37,11 @@ class Workflow(BaseModel):
                     raise ValueError(f"Action {a.id!r} depends on unknown action {dep!r}")
                 if dep == a.id:
                     raise ValueError(f"Action {a.id!r} depends on itself")
+        for group_name, group in (
+            ("on_success", self.on_success),
+            ("on_failure", self.on_failure),
+        ):
+            for a in group:
+                if a.depends_on:
+                    raise ValueError(f"Action {a.id!r} in {group_name} cannot declare depends_on")
         return self

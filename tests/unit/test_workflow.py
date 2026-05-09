@@ -93,3 +93,29 @@ def test_workflow_frozen() -> None:
     )
     with pytest.raises(ValidationError):
         w.name = "renamed"
+
+
+def test_workflow_on_success_depends_on_rejected() -> None:
+    with pytest.raises(ValidationError) as exc:
+        Workflow(
+            name="bad",
+            trigger=_trigger(),
+            actions=[ActionSpec(id="a1", type="ai_report")],
+            on_success=[
+                ActionSpec(id="ok", type="set_field", depends_on=["a1"]),
+            ],
+        )
+    assert "on_success" in str(exc.value)
+
+
+def test_workflow_on_failure_depends_on_rejected() -> None:
+    with pytest.raises(ValidationError) as exc:
+        Workflow(
+            name="bad",
+            trigger=_trigger(),
+            actions=[ActionSpec(id="a1", type="ai_report")],
+            on_failure=[
+                ActionSpec(id="fail", type="set_field", depends_on=["a1"]),
+            ],
+        )
+    assert "on_failure" in str(exc.value)

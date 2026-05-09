@@ -44,9 +44,7 @@ Thumbs.db
 .dolt/
 *.db
 .beads-credential-key
+# bd ships its own .beads/.gitignore for local DB and runtime files
 
-# Track the shared issue export; ignore local DB and other beads state
-/.beads/*
-!/.beads/issues.jsonl
-
-/.claude/
+# Claude Code per-user overrides (project settings.json is tracked)
+.claude/settings.local.json

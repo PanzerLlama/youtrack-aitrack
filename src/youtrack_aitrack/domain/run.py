@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from enum import StrEnum
 from typing import Any
+from uuid import uuid4
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -26,6 +27,7 @@ class ActionResult(BaseModel):
 
 
 class RunReport(BaseModel):
+    run_id: str = Field(default_factory=lambda: uuid4().hex)
     workflow_name: str
     state: RunState
     action_results: list[ActionResult] = Field(default_factory=list)

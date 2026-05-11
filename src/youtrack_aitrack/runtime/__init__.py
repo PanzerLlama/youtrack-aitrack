@@ -5,13 +5,23 @@ from youtrack_aitrack.runtime.factory import (
     NoOpCommentPoster,
     NoOpFieldWriter,
 )
-from youtrack_aitrack.runtime.runner import IssueStateLookup, Runner, build_runner
+from youtrack_aitrack.runtime.poller import Poller, PollResult, build_poller
+from youtrack_aitrack.runtime.runner import (
+    ActivityFeed,
+    IssueStateLookup,
+    Runner,
+    build_runner,
+)
 
 __all__ = [
     "ActionFactory",
+    "ActivityFeed",
     "IssueStateLookup",
     "NoOpCommentPoster",
     "NoOpFieldWriter",
+    "PollResult",
+    "Poller",
     "Runner",
+    "build_poller",
     "build_runner",
 ]

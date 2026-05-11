@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Protocol
@@ -29,6 +30,25 @@ from youtrack_aitrack.runtime.factory import (
 
 class IssueStateLookup(Protocol):
     async def get_issue_state(self, issue_id: str) -> str | None: ...
+
+
+class ActivityFeed(Protocol):
+    async def changed_issues_since(
+        self, cursor: str | None
+    ) -> tuple[list[IssueEvent], str | None]: ...
+
+
+@dataclass(frozen=True)
+class Wiring:
+    """All adapters + workflows composed for one instance — shared by Runner and Poller."""
+
+    config: InstanceConfig
+    yt: YouTrackClient
+    run_store: JsonRunStore
+    git: GitDiffAdapter
+    engine: WorkflowEngine
+    workflows: list[Workflow]
+    repo_dir: Path
 
 
 class Runner:
@@ -96,14 +116,14 @@ class Runner:
         return branch, diff, commit_sha, set()
 
 
-def build_runner(
+def wire(
     config: InstanceConfig,
     config_dir: Path,
     *,
     repo_dir: Path | None = None,
     dry_run: bool = False,
     workflow_names: set[str] | None = None,
-) -> Runner:
+) -> Wiring:
     yt = YouTrackClient(config.youtrack.url, config.youtrack.token, project=config.youtrack.project)
     llm = AnthropicLLMClient(config.anthropic.api_key)
     renderer = JinjaPromptRenderer(config.prompts_path(config_dir))
@@ -116,14 +136,40 @@ def build_runner(
         factory.materialize_workflow(w) for w in _load_workflows(config, config_dir, workflow_names)
     ]
     engine = WorkflowEngine(idempotency_store=_as_idempotency_store(run_store))
-    return Runner(
+    return Wiring(
         config=config,
-        workflows=workflows,
-        engine=engine,
-        git_provider=git,
-        repo_dir=repo_dir if repo_dir is not None else Path.cwd(),
+        yt=yt,
         run_store=run_store,
-        state_lookup=yt,
+        git=git,
+        engine=engine,
+        workflows=workflows,
+        repo_dir=repo_dir if repo_dir is not None else Path.cwd(),
+    )
+
+
+def build_runner(
+    config: InstanceConfig,
+    config_dir: Path,
+    *,
+    repo_dir: Path | None = None,
+    dry_run: bool = False,
+    workflow_names: set[str] | None = None,
+) -> Runner:
+    w = wire(
+        config,
+        config_dir,
+        repo_dir=repo_dir,
+        dry_run=dry_run,
+        workflow_names=workflow_names,
+    )
+    return Runner(
+        config=w.config,
+        workflows=w.workflows,
+        engine=w.engine,
+        git_provider=w.git,
+        repo_dir=w.repo_dir,
+        run_store=w.run_store,
+        state_lookup=w.yt,
     )
 
 

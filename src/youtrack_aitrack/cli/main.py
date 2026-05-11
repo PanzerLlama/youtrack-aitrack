@@ -9,6 +9,7 @@ from dotenv import load_dotenv
 
 from youtrack_aitrack.cli.config_dir import resolve_config_dir
 from youtrack_aitrack.cli.init import init_command
+from youtrack_aitrack.cli.workflows import app as workflows_app
 
 app = typer.Typer(
     name="youtrack-aitrack",
@@ -44,6 +45,7 @@ def version() -> None:
 
 
 app.command("init")(init_command)
+app.add_typer(workflows_app, name="workflows")
 
 
 if __name__ == "__main__":

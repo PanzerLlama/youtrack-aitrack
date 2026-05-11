@@ -132,3 +132,32 @@ def test_pages_changed_prompt_renders_verbatim() -> None:
     renderer = JinjaPromptRenderer(Path("prompts"))
     rendered = renderer.render("pages_changed.md", _ctx())
     assert rendered == EXPECTED
+
+
+def test_pages_changed_includes_base_url_when_set() -> None:
+    event = IssueEvent(
+        issue_id="SHOP-17",
+        project="SHOP",
+        event_kind="status_change",
+        from_state="In Progress",
+        to_state="Ready for testing",
+        actor="bob",
+        timestamp=datetime(2026, 5, 11, 12, 0, tzinfo=UTC),
+    )
+    ctx = Context(
+        issue=event,
+        branch="SHOP-17-default-currency",
+        diff=_DIFF,
+        base_url="https://staging.example.com",
+    )
+    rendered = JinjaPromptRenderer(Path("prompts")).render("pages_changed.md", ctx)
+
+    assert "- Base URL: https://staging.example.com" in rendered
+    assert "When a Base URL is provided above" in rendered
+    assert "`https://staging.example.com/admin/users`" in rendered
+
+
+def test_pages_changed_omits_base_url_block_when_unset() -> None:
+    rendered = JinjaPromptRenderer(Path("prompts")).render("pages_changed.md", _ctx())
+    assert "Base URL" not in rendered
+    assert "clickable" not in rendered

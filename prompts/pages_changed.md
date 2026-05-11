@@ -11,6 +11,9 @@ start manual testing.
 - Actor: {{ ctx.issue.actor }}
 - Timestamp: {{ ctx.issue.timestamp }}
 - Branch: {{ ctx.branch }}
+{%- if ctx.base_url %}
+- Base URL: {{ ctx.base_url }}
+{%- endif %}
 
 ## Diff under review
 
@@ -60,6 +63,12 @@ A bulleted list. One bullet per inferred route or page. Use this shape:
 
 - `<inferred URL or screen name>` - contributed by:
   - `<path/from/diff>` - one-line note on what changed there.
+{%- if ctx.base_url %}
+
+When a Base URL is provided above, emit each affected route as a full clickable
+URL by prefixing the inferred path with `{{ ctx.base_url }}` (strip any trailing
+slash on the base before joining). Example: `{{ ctx.base_url }}/admin/users`.
+{%- endif %}
 
 If no file in the diff maps to a route, write "No directly affected routes."
 

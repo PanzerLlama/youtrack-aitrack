@@ -80,6 +80,7 @@ class Runner:
             commit_sha=commit_sha,
             branch=branch,
             diff=diff,
+            base_url=self._config.defaults.base_url,
             force=force,
         )
         for report in reports:

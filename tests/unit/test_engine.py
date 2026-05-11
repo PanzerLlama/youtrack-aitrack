@@ -427,6 +427,35 @@ async def test_branch_and_diff_default_to_none() -> None:
     assert ctx.diff is None
 
 
+async def test_dispatch_threads_base_url_into_context() -> None:
+    a = _FakeAction(id="a")
+    wf = _wf(actions=[a])
+
+    await WorkflowEngine().dispatch(_manual_event(), [wf], base_url="https://staging.example.com")
+
+    ctx = cast(_FakeAction, a).calls[0]
+    assert ctx.base_url == "https://staging.example.com"
+
+
+async def test_base_url_defaults_to_none() -> None:
+    a = _FakeAction(id="a")
+    wf = _wf(actions=[a])
+
+    await WorkflowEngine().dispatch(_manual_event(), [wf])
+
+    assert cast(_FakeAction, a).calls[0].base_url is None
+
+
+async def test_base_url_propagates_to_hooks() -> None:
+    a = _FakeAction(id="a")
+    hook = _FakeAction(id="celebrate")
+    wf = _wf(actions=[a], on_success=[hook])
+
+    await WorkflowEngine().dispatch(_manual_event(), [wf], base_url="https://staging.example.com")
+
+    assert cast(_FakeAction, hook).calls[0].base_url == "https://staging.example.com"
+
+
 async def test_branch_and_diff_propagate_to_hooks() -> None:
     a = _FakeAction(id="a")
     hook = _FakeAction(id="celebrate")

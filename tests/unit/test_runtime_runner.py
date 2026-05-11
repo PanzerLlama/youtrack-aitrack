@@ -75,7 +75,7 @@ class _FakeLLM:
 
 class _FakeRenderer:
     def render(self, template: str, ctx: Context) -> str:
-        return f"branch={ctx.branch}|diff={ctx.diff}|tmpl={template}"
+        return f"branch={ctx.branch}|diff={ctx.diff}|base_url={ctx.base_url}|tmpl={template}"
 
 
 class _FakeWriter:
@@ -125,12 +125,12 @@ class _FakeRunStore:
         self._idem[key] = run_id
 
 
-def _config() -> InstanceConfig:
+def _config(*, base_url: str | None = None) -> InstanceConfig:
     return InstanceConfig(
         youtrack=YouTrackSection(url="https://yt.example.com", token="t", project="DEMO"),
         anthropic=AnthropicSection(api_key="k"),
         paths=PathsSection(),
-        defaults=DefaultsSection(branch_pattern="{task_id}-*"),
+        defaults=DefaultsSection(branch_pattern="{task_id}-*", base_url=base_url),
     )
 
 
@@ -151,6 +151,7 @@ def _build(
     writer: _FakeWriter | None = None,
     run_store: _FakeRunStore | None = None,
     state_lookup: _FakeStateLookup | None = None,
+    base_url: str | None = None,
 ) -> tuple[Runner, _FakeLLM, _FakeWriter, _FakeRunStore, _FakeStateLookup]:
     llm = llm or _FakeLLM()
     writer = writer or _FakeWriter()
@@ -159,7 +160,7 @@ def _build(
     factory = ActionFactory(llm=llm, renderer=_FakeRenderer(), writer=writer, poster=_FakePoster())
     workflows = [factory.materialize_workflow(workflow)]
     runner = Runner(
-        config=_config(),
+        config=_config(base_url=base_url),
         workflows=workflows,
         engine=WorkflowEngine(idempotency_store=run_store),
         git_provider=git,
@@ -290,6 +291,39 @@ async def test_run_returns_empty_when_state_does_not_match_any_trigger() -> None
 
     assert reports == []
     assert writer.calls == []
+
+
+async def test_dispatch_forwards_base_url_from_config_to_engine() -> None:
+    git = _FakeGit()
+    wf = Workflow(
+        name="audit",
+        trigger=ManualTrigger(),
+        actions=[
+            AiReportAction(id="a", inputs=["git_diff"], prompt="p.md", model="m"),
+        ],
+    )
+    runner, llm, _, _, _ = _build(git=git, workflow=wf, base_url="https://app.example.com")
+
+    await runner.dispatch(_manual_event())
+
+    assert len(llm.calls) == 1
+    rendered_prompt, _model = llm.calls[0]
+    assert "base_url=https://app.example.com" in rendered_prompt
+
+
+async def test_dispatch_base_url_none_when_config_unset() -> None:
+    git = _FakeGit()
+    wf = Workflow(
+        name="audit",
+        trigger=ManualTrigger(),
+        actions=[AiReportAction(id="a", inputs=["git_diff"], prompt="p.md", model="m")],
+    )
+    runner, llm, _, _, _ = _build(git=git, workflow=wf)
+
+    await runner.dispatch(_manual_event())
+
+    rendered_prompt, _model = llm.calls[0]
+    assert "base_url=None" in rendered_prompt
 
 
 async def test_run_force_bypasses_idempotency() -> None:

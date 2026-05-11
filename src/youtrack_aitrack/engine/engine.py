@@ -27,6 +27,7 @@ class WorkflowEngine:
         commit_sha: str | None = None,
         branch: str | None = None,
         diff: str | None = None,
+        base_url: str | None = None,
         force: bool = False,
     ) -> list[RunReport]:
         matched = [w for w in workflows if _trigger_matches(w, event)]
@@ -48,6 +49,7 @@ class WorkflowEngine:
                         unavailable_inputs=unavailable_inputs,
                         branch=branch,
                         diff=diff,
+                        base_url=base_url,
                     )
                     for w, _ in scheduled
                 )
@@ -85,6 +87,7 @@ class WorkflowEngine:
         unavailable_inputs: set[str] | None = None,
         branch: str | None = None,
         diff: str | None = None,
+        base_url: str | None = None,
     ) -> RunReport:
         outputs: dict[str, ActionResult] = {}
         failed = await _execute_graph(
@@ -94,9 +97,12 @@ class WorkflowEngine:
             unavailable_inputs or set(),
             branch=branch,
             diff=diff,
+            base_url=base_url,
         )
         hook_specs = workflow.on_failure if failed else workflow.on_success
-        hook_results = await _execute_hooks(hook_specs, event, outputs, branch=branch, diff=diff)
+        hook_results = await _execute_hooks(
+            hook_specs, event, outputs, branch=branch, diff=diff, base_url=base_url
+        )
         return RunReport(
             workflow_name=workflow.name,
             state=RunState.FAILED if failed else RunState.DONE,
@@ -117,6 +123,7 @@ async def _execute_graph(
     *,
     branch: str | None,
     diff: str | None,
+    base_url: str | None,
 ) -> bool:
     by_id = {a.id: a for a in specs}
     remaining = set(by_id)
@@ -139,7 +146,13 @@ async def _execute_graph(
                 to_run.append(aid)
         if not to_run:
             continue
-        ctx = Context(issue=event, branch=branch, diff=diff, action_outputs=dict(outputs))
+        ctx = Context(
+            issue=event,
+            branch=branch,
+            diff=diff,
+            base_url=base_url,
+            action_outputs=dict(outputs),
+        )
         results = await asyncio.gather(
             *(_run_one(by_id[aid], ctx) for aid in to_run),
             return_exceptions=True,
@@ -173,10 +186,17 @@ async def _execute_hooks(
     *,
     branch: str | None,
     diff: str | None,
+    base_url: str | None,
 ) -> list[ActionResult]:
     if not specs:
         return []
-    ctx = Context(issue=event, branch=branch, diff=diff, action_outputs=dict(outputs))
+    ctx = Context(
+        issue=event,
+        branch=branch,
+        diff=diff,
+        base_url=base_url,
+        action_outputs=dict(outputs),
+    )
     results = await asyncio.gather(
         *(_run_one(a, ctx) for a in specs),
         return_exceptions=True,

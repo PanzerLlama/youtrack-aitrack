@@ -22,6 +22,8 @@ class ActionResult(BaseModel):
     output: dict[str, Any] | None = None
     error: str | None = None
     duration_ms: int | None = None
+    skipped: bool = False
+    skip_reason: str | None = None
 
     model_config = ConfigDict(frozen=True)
 

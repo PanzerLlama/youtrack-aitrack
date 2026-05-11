@@ -18,15 +18,27 @@ class WorkflowEngine:
         self,
         event: IssueEvent,
         workflows: list[Workflow],
+        *,
+        unavailable_inputs: set[str] | None = None,
     ) -> list[RunReport]:
         matched = [w for w in workflows if _trigger_matches(w, event)]
         if not matched:
             return []
-        return list(await asyncio.gather(*(self.run(w, event) for w in matched)))
+        return list(
+            await asyncio.gather(
+                *(self.run(w, event, unavailable_inputs=unavailable_inputs) for w in matched)
+            )
+        )
 
-    async def run(self, workflow: Workflow, event: IssueEvent) -> RunReport:
+    async def run(
+        self,
+        workflow: Workflow,
+        event: IssueEvent,
+        *,
+        unavailable_inputs: set[str] | None = None,
+    ) -> RunReport:
         outputs: dict[str, ActionResult] = {}
-        failed = await _execute_graph(workflow.actions, event, outputs)
+        failed = await _execute_graph(workflow.actions, event, outputs, unavailable_inputs or set())
         hook_specs = workflow.on_failure if failed else workflow.on_success
         hook_results = await _execute_hooks(hook_specs, event, outputs)
         return RunReport(
@@ -45,6 +57,7 @@ async def _execute_graph(
     specs: list[ActionSpec],
     event: IssueEvent,
     outputs: dict[str, ActionResult],
+    unavailable_inputs: set[str],
 ) -> bool:
     by_id = {a.id: a for a in specs}
     remaining = set(by_id)
@@ -55,17 +68,43 @@ async def _execute_graph(
         )
         if not ready:
             break
+        to_run: list[str] = []
+        for aid in ready:
+            skip = _skip_reason(by_id[aid], outputs, unavailable_inputs)
+            if skip is not None:
+                outputs[aid] = ActionResult(
+                    action_id=aid, success=True, skipped=True, skip_reason=skip
+                )
+                remaining.discard(aid)
+            else:
+                to_run.append(aid)
+        if not to_run:
+            continue
         ctx = Context(issue=event, action_outputs=dict(outputs))
         results = await asyncio.gather(
-            *(_run_one(by_id[aid], ctx) for aid in ready),
+            *(_run_one(by_id[aid], ctx) for aid in to_run),
             return_exceptions=True,
         )
-        for aid, res in zip(ready, results, strict=True):
+        for aid, res in zip(to_run, results, strict=True):
             outputs[aid] = _coerce_result(aid, res)
             remaining.discard(aid)
-            if not outputs[aid].success:
+            if not outputs[aid].success and not outputs[aid].skipped:
                 failed = True
     return failed
+
+
+def _skip_reason(
+    spec: ActionSpec,
+    outputs: dict[str, ActionResult],
+    unavailable_inputs: set[str],
+) -> str | None:
+    missing = [i for i in spec.inputs if i in unavailable_inputs]
+    if missing:
+        return f"missing inputs: {sorted(missing)}"
+    skipped_parents = [d for d in spec.depends_on if outputs[d].skipped]
+    if skipped_parents:
+        return f"depends_on skipped: {sorted(skipped_parents)}"
+    return None
 
 
 async def _execute_hooks(

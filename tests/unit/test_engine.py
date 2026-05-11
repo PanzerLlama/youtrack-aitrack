@@ -244,3 +244,70 @@ async def test_downstream_action_sees_upstream_results() -> None:
     parent_result = child_ctx.action_outputs["parent"]
     assert parent_result.success is True
     assert parent_result.output == {"key": "parent-output"}
+
+
+# --- unavailable_inputs: skip diff-dependent actions but run the rest ---
+
+
+async def test_unavailable_input_skips_dependent_action() -> None:
+    diff_dep = _FakeAction(id="diff_dep", inputs=["git_diff", "task_meta"])
+    meta_only = _FakeAction(id="meta_only", inputs=["task_meta"])
+    wf = _wf(actions=[diff_dep, meta_only])
+
+    [report] = await WorkflowEngine().dispatch(
+        _manual_event(), [wf], unavailable_inputs={"git_diff"}
+    )
+
+    assert report.state is RunState.DONE
+    by_id = {r.action_id: r for r in report.action_results}
+    assert by_id["diff_dep"].skipped is True
+    assert by_id["diff_dep"].skip_reason is not None
+    assert "git_diff" in by_id["diff_dep"].skip_reason
+    assert by_id["meta_only"].skipped is False
+    assert by_id["meta_only"].success is True
+    assert cast(_FakeAction, diff_dep).calls == []
+    assert cast(_FakeAction, meta_only).calls != []
+
+
+async def test_all_diff_dependent_workflow_completes_cleanly() -> None:
+    a = _FakeAction(id="a", inputs=["git_diff"])
+    b = _FakeAction(id="b", inputs=["git_diff", "route_index"])
+    success_hook = _FakeAction(id="celebrate")
+    fail_hook = _FakeAction(id="cleanup")
+    wf = _wf(actions=[a, b], on_success=[success_hook], on_failure=[fail_hook])
+
+    [report] = await WorkflowEngine().dispatch(
+        _manual_event(), [wf], unavailable_inputs={"git_diff"}
+    )
+
+    assert report.state is RunState.DONE
+    assert all(r.skipped for r in report.action_results)
+    assert [h.action_id for h in report.hook_results] == ["celebrate"]
+    assert cast(_FakeAction, fail_hook).calls == []
+
+
+async def test_skipped_parent_cascades_to_dependent() -> None:
+    parent = _FakeAction(id="parent", inputs=["git_diff"])
+    child = _FakeAction(id="child", depends_on=["parent"], inputs=["dependency_outputs"])
+    wf = _wf(actions=[parent, child])
+
+    [report] = await WorkflowEngine().dispatch(
+        _manual_event(), [wf], unavailable_inputs={"git_diff"}
+    )
+
+    assert report.state is RunState.DONE
+    by_id = {r.action_id: r for r in report.action_results}
+    assert by_id["parent"].skipped is True
+    assert by_id["child"].skipped is True
+    assert by_id["child"].skip_reason is not None
+    assert "parent" in by_id["child"].skip_reason
+    assert cast(_FakeAction, child).calls == []
+
+
+async def test_unavailable_inputs_none_runs_normally() -> None:
+    a = _FakeAction(id="a", inputs=["git_diff"])
+    wf = _wf(actions=[a])
+    [report] = await WorkflowEngine().dispatch(_manual_event(), [wf])
+    assert report.state is RunState.DONE
+    assert report.action_results[0].skipped is False
+    assert report.action_results[0].success is True

@@ -11,24 +11,60 @@ from youtrack_aitrack.domain.event import IssueEvent
 from youtrack_aitrack.domain.run import ActionResult, RunReport, RunState
 from youtrack_aitrack.domain.trigger import Trigger
 from youtrack_aitrack.domain.workflow import Workflow
+from youtrack_aitrack.engine.idempotency import IdempotencyStore, build_idempotency_key
 
 
 class WorkflowEngine:
+    def __init__(self, *, idempotency_store: IdempotencyStore | None = None) -> None:
+        self._idempotency = idempotency_store
+
     async def dispatch(
         self,
         event: IssueEvent,
         workflows: list[Workflow],
         *,
         unavailable_inputs: set[str] | None = None,
+        commit_sha: str | None = None,
+        force: bool = False,
     ) -> list[RunReport]:
         matched = [w for w in workflows if _trigger_matches(w, event)]
         if not matched:
             return []
-        return list(
+        scheduled = [
+            (w, self._key_for(w, event, commit_sha))
+            for w in matched
+            if force or not self._already_processed(w, event, commit_sha)
+        ]
+        if not scheduled:
+            return []
+        reports = list(
             await asyncio.gather(
-                *(self.run(w, event, unavailable_inputs=unavailable_inputs) for w in matched)
+                *(self.run(w, event, unavailable_inputs=unavailable_inputs) for w, _ in scheduled)
             )
         )
+        self._record(scheduled, reports)
+        return reports
+
+    def _key_for(self, workflow: Workflow, event: IssueEvent, commit_sha: str | None) -> str:
+        return build_idempotency_key(
+            workflow_name=workflow.name,
+            issue_id=event.issue_id,
+            to_state=event.to_state,
+            commit_sha=commit_sha,
+        )
+
+    def _already_processed(
+        self, workflow: Workflow, event: IssueEvent, commit_sha: str | None
+    ) -> bool:
+        if self._idempotency is None:
+            return False
+        return self._idempotency.has_processed(self._key_for(workflow, event, commit_sha))
+
+    def _record(self, scheduled: list[tuple[Workflow, str]], reports: list[RunReport]) -> None:
+        if self._idempotency is None:
+            return
+        for (_, key), report in zip(scheduled, reports, strict=True):
+            self._idempotency.mark_processed(key, report.run_id)
 
     async def run(
         self,

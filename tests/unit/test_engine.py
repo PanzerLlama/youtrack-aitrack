@@ -16,6 +16,10 @@ from youtrack_aitrack.domain.triggers.manual import ManualTrigger
 from youtrack_aitrack.domain.triggers.status_change import StatusChangeTrigger
 from youtrack_aitrack.domain.workflow import Workflow
 from youtrack_aitrack.engine import WorkflowEngine
+from youtrack_aitrack.engine.idempotency import (
+    _InMemoryIdempotencyStore,
+    build_idempotency_key,
+)
 
 
 def _manual_event() -> IssueEvent:
@@ -311,3 +315,100 @@ async def test_unavailable_inputs_none_runs_normally() -> None:
     assert report.state is RunState.DONE
     assert report.action_results[0].skipped is False
     assert report.action_results[0].success is True
+
+
+# --- idempotency dedup ---
+
+
+async def test_idempotency_skips_second_dispatch_for_same_key() -> None:
+    store = _InMemoryIdempotencyStore()
+    engine = WorkflowEngine(idempotency_store=store)
+    action = _FakeAction(id="a")
+    wf = _wf(actions=[action])
+
+    first = await engine.dispatch(_manual_event(), [wf], commit_sha="abc")
+    second = await engine.dispatch(_manual_event(), [wf], commit_sha="abc")
+
+    assert len(first) == 1
+    assert second == []
+    assert len(cast(_FakeAction, action).calls) == 1
+
+
+async def test_idempotency_different_commit_sha_proceeds() -> None:
+    store = _InMemoryIdempotencyStore()
+    engine = WorkflowEngine(idempotency_store=store)
+    action = _FakeAction(id="a")
+    wf = _wf(actions=[action])
+
+    await engine.dispatch(_manual_event(), [wf], commit_sha="abc")
+    second = await engine.dispatch(_manual_event(), [wf], commit_sha="def")
+
+    assert len(second) == 1
+    assert len(cast(_FakeAction, action).calls) == 2
+
+
+async def test_idempotency_force_bypasses_dedup() -> None:
+    store = _InMemoryIdempotencyStore()
+    engine = WorkflowEngine(idempotency_store=store)
+    action = _FakeAction(id="a")
+    wf = _wf(actions=[action])
+
+    await engine.dispatch(_manual_event(), [wf], commit_sha="abc")
+    second = await engine.dispatch(_manual_event(), [wf], commit_sha="abc", force=True)
+
+    assert len(second) == 1
+    assert len(cast(_FakeAction, action).calls) == 2
+
+
+async def test_idempotency_per_workflow_independence() -> None:
+    store = _InMemoryIdempotencyStore()
+    engine = WorkflowEngine(idempotency_store=store)
+    a = _FakeAction(id="a")
+    b = _FakeAction(id="b")
+    wf1 = _wf(name="w1", actions=[a])
+    wf2 = _wf(name="w2", actions=[b])
+
+    first = await engine.dispatch(_manual_event(), [wf1, wf2], commit_sha="abc")
+    second = await engine.dispatch(_manual_event(), [wf1, wf2], commit_sha="abc")
+
+    assert {r.workflow_name for r in first} == {"w1", "w2"}
+    assert second == []
+
+
+async def test_idempotency_no_store_means_no_dedup() -> None:
+    action = _FakeAction(id="a")
+    wf = _wf(actions=[action])
+    engine = WorkflowEngine()
+    await engine.dispatch(_manual_event(), [wf], commit_sha="abc")
+    await engine.dispatch(_manual_event(), [wf], commit_sha="abc")
+    assert len(cast(_FakeAction, action).calls) == 2
+
+
+async def test_idempotency_records_run_id_after_run() -> None:
+    store = _InMemoryIdempotencyStore()
+    engine = WorkflowEngine(idempotency_store=store)
+    wf = _wf(actions=[_FakeAction(id="a")])
+
+    [report] = await engine.dispatch(_manual_event(), [wf], commit_sha="abc")
+    key = build_idempotency_key(
+        workflow_name="wf",
+        issue_id="DEMO-1",
+        to_state=None,
+        commit_sha="abc",
+    )
+    assert store.has_processed(key) is True
+    assert store._seen[key] == report.run_id
+
+
+def test_build_idempotency_key_is_deterministic() -> None:
+    k1 = build_idempotency_key(
+        workflow_name="w", issue_id="DEMO-1", to_state="Ready", commit_sha="abc"
+    )
+    k2 = build_idempotency_key(
+        workflow_name="w", issue_id="DEMO-1", to_state="Ready", commit_sha="abc"
+    )
+    assert k1 == k2
+    k3 = build_idempotency_key(
+        workflow_name="w", issue_id="DEMO-1", to_state="Ready", commit_sha="def"
+    )
+    assert k1 != k3

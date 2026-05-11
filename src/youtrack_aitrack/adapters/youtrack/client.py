@@ -64,6 +64,21 @@ class YouTrackClient:
         resp = await self._http.post(url, params={"fields": "id"}, json={"text": body})
         _check(resp)
 
+    async def get_issue_state(self, issue_id: str) -> str | None:
+        url = f"{self._base}/api/issues/{issue_id}"
+        resp = await self._http.get(url, params={"fields": "customFields(name,value(name))"})
+        _check(resp)
+        for cf in resp.json().get("customFields", []):
+            if cf.get("name") != STATE_FIELD_NAME:
+                continue
+            value = cf.get("value")
+            if isinstance(value, dict):
+                name = value.get("name")
+                if isinstance(name, str):
+                    return name
+            return None
+        return None
+
     async def changed_issues_since(self, cursor: str | None) -> tuple[list[IssueEvent], str | None]:
         params: dict[str, str] = {
             "categories": "CustomFieldCategory",

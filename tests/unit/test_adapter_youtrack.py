@@ -262,6 +262,65 @@ async def test_changed_issues_since_filters_out_other_projects(
 
 
 @respx.mock(base_url=BASE_URL)
+async def test_get_issue_state_returns_current_state(respx_mock: respx.MockRouter) -> None:
+    respx_mock.get("/api/issues/DEMO-1").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "customFields": [
+                    {"name": "Priority", "value": {"name": "Normal"}},
+                    {"name": STATE_FIELD_NAME, "value": {"name": "Ready for testing"}},
+                ]
+            },
+        )
+    )
+
+    client = _make_client()
+    state = await client.get_issue_state("DEMO-1")
+
+    assert state == "Ready for testing"
+
+
+@respx.mock(base_url=BASE_URL)
+async def test_get_issue_state_returns_none_when_state_absent(
+    respx_mock: respx.MockRouter,
+) -> None:
+    respx_mock.get("/api/issues/DEMO-1").mock(
+        return_value=httpx.Response(
+            200,
+            json={"customFields": [{"name": "Priority", "value": {"name": "Normal"}}]},
+        )
+    )
+
+    client = _make_client()
+    assert await client.get_issue_state("DEMO-1") is None
+
+
+@respx.mock(base_url=BASE_URL)
+async def test_get_issue_state_returns_none_when_value_null(
+    respx_mock: respx.MockRouter,
+) -> None:
+    respx_mock.get("/api/issues/DEMO-1").mock(
+        return_value=httpx.Response(
+            200,
+            json={"customFields": [{"name": STATE_FIELD_NAME, "value": None}]},
+        )
+    )
+
+    client = _make_client()
+    assert await client.get_issue_state("DEMO-1") is None
+
+
+@respx.mock(base_url=BASE_URL)
+async def test_get_issue_state_raises_on_4xx(respx_mock: respx.MockRouter) -> None:
+    respx_mock.get("/api/issues/DEMO-1").mock(return_value=httpx.Response(404, text="missing"))
+
+    client = _make_client()
+    with pytest.raises(YouTrackError, match="404"):
+        await client.get_issue_state("DEMO-1")
+
+
+@respx.mock(base_url=BASE_URL)
 async def test_4xx_response_raises_typed_error(respx_mock: respx.MockRouter) -> None:
     respx_mock.get(f"/api/admin/projects/{PROJECT}/customFields").mock(
         return_value=httpx.Response(403, text="forbidden")

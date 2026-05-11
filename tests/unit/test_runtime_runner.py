@@ -91,6 +91,16 @@ class _FakePoster:
         return None
 
 
+class _FakeStateLookup:
+    def __init__(self, state: str | None = None) -> None:
+        self.state = state
+        self.calls: list[str] = []
+
+    async def get_issue_state(self, issue_id: str) -> str | None:
+        self.calls.append(issue_id)
+        return self.state
+
+
 class _FakeRunStore:
     def __init__(self) -> None:
         self.saved: list[RunReport] = []
@@ -140,10 +150,12 @@ def _build(
     llm: _FakeLLM | None = None,
     writer: _FakeWriter | None = None,
     run_store: _FakeRunStore | None = None,
-) -> tuple[Runner, _FakeLLM, _FakeWriter, _FakeRunStore]:
+    state_lookup: _FakeStateLookup | None = None,
+) -> tuple[Runner, _FakeLLM, _FakeWriter, _FakeRunStore, _FakeStateLookup]:
     llm = llm or _FakeLLM()
     writer = writer or _FakeWriter()
     run_store = run_store or _FakeRunStore()
+    state_lookup = state_lookup or _FakeStateLookup()
     factory = ActionFactory(llm=llm, renderer=_FakeRenderer(), writer=writer, poster=_FakePoster())
     workflows = [factory.materialize_workflow(workflow)]
     runner = Runner(
@@ -153,8 +165,9 @@ def _build(
         git_provider=git,
         repo_dir=Path("/tmp/fakerepo"),
         run_store=run_store,
+        state_lookup=state_lookup,
     )
-    return runner, llm, writer, run_store
+    return runner, llm, writer, run_store, state_lookup
 
 
 async def test_dispatch_resolves_branch_diff_sha_and_runs_ai_report() -> None:
@@ -171,7 +184,7 @@ async def test_dispatch_resolves_branch_diff_sha_and_runs_ai_report() -> None:
             )
         ],
     )
-    runner, llm, _, run_store = _build(git=git, workflow=wf)
+    runner, llm, _, run_store, _ = _build(git=git, workflow=wf)
 
     [report] = await runner.dispatch(_manual_event())
 
@@ -201,7 +214,7 @@ async def test_dispatch_no_branch_marks_git_diff_unavailable() -> None:
             )
         ],
     )
-    runner, llm, _, _ = _build(git=git, workflow=wf)
+    runner, llm, _, _, _ = _build(git=git, workflow=wf)
 
     [report] = await runner.dispatch(_manual_event())
 
@@ -219,7 +232,7 @@ async def test_dispatch_resolve_branch_error_marks_unavailable() -> None:
         trigger=ManualTrigger(),
         actions=[AiReportAction(id="a", inputs=["git_diff"], prompt="p.md", model="m")],
     )
-    runner, llm, _, _ = _build(git=git, workflow=wf)
+    runner, llm, _, _, _ = _build(git=git, workflow=wf)
 
     [report] = await runner.dispatch(_manual_event())
 
@@ -234,7 +247,7 @@ async def test_dispatch_diff_error_after_branch_resolved_still_skips() -> None:
         trigger=ManualTrigger(),
         actions=[AiReportAction(id="a", inputs=["git_diff"], prompt="p.md", model="m")],
     )
-    runner, llm, _, _ = _build(git=git, workflow=wf)
+    runner, llm, _, _, _ = _build(git=git, workflow=wf)
 
     [report] = await runner.dispatch(_manual_event())
 
@@ -242,19 +255,60 @@ async def test_dispatch_diff_error_after_branch_resolved_still_skips() -> None:
     assert llm.calls == []
 
 
-async def test_run_fabricates_manual_event_and_dispatches() -> None:
+async def test_run_fabricates_status_change_event_from_current_state() -> None:
     git = _FakeGit()
+    from youtrack_aitrack.domain.triggers.status_change import StatusChangeTrigger
+
     wf = Workflow(
         name="audit",
-        trigger=ManualTrigger(),
-        actions=[SetFieldAction(id="s", fields={"State": "Done"})],
+        trigger=StatusChangeTrigger(to_state="Ready for testing"),
+        actions=[SetFieldAction(id="s", fields={"Status": "audited"})],
     )
-    runner, _, writer, _ = _build(git=git, workflow=wf)
+    state_lookup = _FakeStateLookup(state="Ready for testing")
+    runner, _, writer, _, _ = _build(git=git, workflow=wf, state_lookup=state_lookup)
 
     reports = await runner.run("DEMO-7")
 
+    assert state_lookup.calls == ["DEMO-7"]
     assert len(reports) == 1
-    assert writer.calls == [("DEMO-7", {"State": "Done"})]
+    assert writer.calls == [("DEMO-7", {"Status": "audited"})]
+
+
+async def test_run_returns_empty_when_state_does_not_match_any_trigger() -> None:
+    git = _FakeGit()
+    from youtrack_aitrack.domain.triggers.status_change import StatusChangeTrigger
+
+    wf = Workflow(
+        name="audit",
+        trigger=StatusChangeTrigger(to_state="Ready for testing"),
+        actions=[SetFieldAction(id="s", fields={"Status": "audited"})],
+    )
+    state_lookup = _FakeStateLookup(state="In progress")
+    runner, _, writer, _, _ = _build(git=git, workflow=wf, state_lookup=state_lookup)
+
+    reports = await runner.run("DEMO-7")
+
+    assert reports == []
+    assert writer.calls == []
+
+
+async def test_run_force_bypasses_idempotency() -> None:
+    git = _FakeGit()
+    from youtrack_aitrack.domain.triggers.status_change import StatusChangeTrigger
+
+    wf = Workflow(
+        name="audit",
+        trigger=StatusChangeTrigger(to_state="Ready for testing"),
+        actions=[SetFieldAction(id="s", fields={"Status": "audited"})],
+    )
+    state_lookup = _FakeStateLookup(state="Ready for testing")
+    runner, _, writer, _, _ = _build(git=git, workflow=wf, state_lookup=state_lookup)
+
+    await runner.run("DEMO-7")
+    await runner.run("DEMO-7")
+    await runner.run("DEMO-7", force=True)
+
+    assert len(writer.calls) == 2
 
 
 async def test_dispatch_action_outputs_flow_between_actions() -> None:
@@ -273,7 +327,7 @@ async def test_dispatch_action_outputs_flow_between_actions() -> None:
             ),
         ],
     )
-    runner, llm, _, _ = _build(git=git, workflow=wf)
+    runner, llm, _, _, _ = _build(git=git, workflow=wf)
 
     [report] = await runner.dispatch(_manual_event())
 
@@ -289,7 +343,7 @@ async def test_idempotency_dedupes_repeat_dispatch_for_same_commit() -> None:
         trigger=ManualTrigger(),
         actions=[AiReportAction(id="a", inputs=["git_diff"], prompt="p.md", model="m")],
     )
-    runner, llm, _, _ = _build(git=git, workflow=wf)
+    runner, llm, _, _, _ = _build(git=git, workflow=wf)
 
     first = await runner.dispatch(_manual_event())
     second = await runner.dispatch(_manual_event())
@@ -302,7 +356,7 @@ async def test_idempotency_dedupes_repeat_dispatch_for_same_commit() -> None:
 @pytest.mark.parametrize("branch", [None, ""])
 def test_resolve_repo_state_empty_branch_marks_unavailable(branch: str | None) -> None:
     git = _FakeGit(branch=branch or None)
-    runner, _, _, _ = _build(
+    runner, _, _, _, _ = _build(
         git=git,
         workflow=Workflow(
             name="x",

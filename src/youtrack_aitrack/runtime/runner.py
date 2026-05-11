@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Protocol
 
 from youtrack_aitrack.adapters.git.diff import GitDiffAdapter, GitDiffError
 from youtrack_aitrack.adapters.llm.anthropic import AnthropicLLMClient
@@ -19,7 +20,15 @@ from youtrack_aitrack.domain.workflow import Workflow
 from youtrack_aitrack.engine import WorkflowEngine
 from youtrack_aitrack.engine.idempotency import IdempotencyStore
 from youtrack_aitrack.engine.run_store import RunStore
-from youtrack_aitrack.runtime.factory import ActionFactory
+from youtrack_aitrack.runtime.factory import (
+    ActionFactory,
+    NoOpCommentPoster,
+    NoOpFieldWriter,
+)
+
+
+class IssueStateLookup(Protocol):
+    async def get_issue_state(self, issue_id: str) -> str | None: ...
 
 
 class Runner:
@@ -32,6 +41,7 @@ class Runner:
         git_provider: GitDiffProvider,
         repo_dir: Path,
         run_store: RunStore,
+        state_lookup: IssueStateLookup,
     ) -> None:
         self._config = config
         self._workflows = workflows
@@ -39,8 +49,9 @@ class Runner:
         self._git = git_provider
         self._repo_dir = repo_dir
         self._run_store = run_store
+        self._state = state_lookup
 
-    async def dispatch(self, event: IssueEvent) -> list[RunReport]:
+    async def dispatch(self, event: IssueEvent, *, force: bool = False) -> list[RunReport]:
         branch, diff, commit_sha, unavailable = self._resolve_repo_state(event.issue_id)
         reports = await self._engine.dispatch(
             event,
@@ -49,19 +60,23 @@ class Runner:
             commit_sha=commit_sha,
             branch=branch,
             diff=diff,
+            force=force,
         )
         for report in reports:
             self._run_store.save_run(report)
         return reports
 
-    async def run(self, issue_id: str) -> list[RunReport]:
+    async def run(self, issue_id: str, *, force: bool = False) -> list[RunReport]:
+        current_state = await self._state.get_issue_state(issue_id)
         event = IssueEvent(
             issue_id=issue_id,
             project=self._config.youtrack.project,
-            event_kind="manual",
+            event_kind="status_change",
+            from_state=None,
+            to_state=current_state,
             timestamp=datetime.now(UTC),
         )
-        return await self.dispatch(event)
+        return await self.dispatch(event, force=force)
 
     def _resolve_repo_state(
         self, issue_id: str
@@ -86,14 +101,20 @@ def build_runner(
     config_dir: Path,
     *,
     repo_dir: Path | None = None,
+    dry_run: bool = False,
+    workflow_names: set[str] | None = None,
 ) -> Runner:
     yt = YouTrackClient(config.youtrack.url, config.youtrack.token, project=config.youtrack.project)
     llm = AnthropicLLMClient(config.anthropic.api_key)
     renderer = JinjaPromptRenderer(config.prompts_path(config_dir))
     git = GitDiffAdapter()
     run_store = JsonRunStore(config.runs_path(config_dir))
-    factory = ActionFactory(llm=llm, renderer=renderer, writer=yt, poster=yt)
-    workflows = [factory.materialize_workflow(w) for w in _load_workflows(config, config_dir)]
+    writer = NoOpFieldWriter() if dry_run else yt
+    poster = NoOpCommentPoster() if dry_run else yt
+    factory = ActionFactory(llm=llm, renderer=renderer, writer=writer, poster=poster)
+    workflows = [
+        factory.materialize_workflow(w) for w in _load_workflows(config, config_dir, workflow_names)
+    ]
     engine = WorkflowEngine(idempotency_store=_as_idempotency_store(run_store))
     return Runner(
         config=config,
@@ -102,14 +123,22 @@ def build_runner(
         git_provider=git,
         repo_dir=repo_dir if repo_dir is not None else Path.cwd(),
         run_store=run_store,
+        state_lookup=yt,
     )
 
 
-def _load_workflows(config: InstanceConfig, config_dir: Path) -> list[Workflow]:
+def _load_workflows(
+    config: InstanceConfig,
+    config_dir: Path,
+    names: set[str] | None,
+) -> list[Workflow]:
     workflows_dir = config.workflows_path(config_dir)
     if not workflows_dir.is_dir():
         return []
-    return [load_workflow(p) for p in sorted(workflows_dir.glob("*.yaml"))]
+    workflows = [load_workflow(p) for p in sorted(workflows_dir.glob("*.yaml"))]
+    if names is None:
+        return workflows
+    return [w for w in workflows if w.name in names]
 
 
 def _as_idempotency_store(store: JsonRunStore) -> IdempotencyStore:

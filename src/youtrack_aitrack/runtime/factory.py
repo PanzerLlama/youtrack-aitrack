@@ -9,6 +9,20 @@ from youtrack_aitrack.domain.actions.yt_comment import CommentPoster, YtCommentA
 from youtrack_aitrack.domain.workflow import Workflow
 
 
+class NoOpFieldWriter:
+    """Dry-run FieldWriter — accepts calls, performs no I/O."""
+
+    async def set_fields(self, issue_id: str, fields: dict[str, str]) -> None:
+        return None
+
+
+class NoOpCommentPoster:
+    """Dry-run CommentPoster — accepts calls, performs no I/O."""
+
+    async def post_comment(self, issue_id: str, body: str) -> None:
+        return None
+
+
 class ActionFactory:
     def __init__(
         self,

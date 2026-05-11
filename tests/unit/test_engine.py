@@ -400,6 +400,47 @@ async def test_idempotency_records_run_id_after_run() -> None:
     assert store._seen[key] == report.run_id
 
 
+# --- branch + diff threaded into Context ---
+
+
+async def test_dispatch_threads_branch_and_diff_into_context() -> None:
+    a = _FakeAction(id="a")
+    wf = _wf(actions=[a])
+
+    await WorkflowEngine().dispatch(
+        _manual_event(), [wf], branch="DEMO-1-fix", diff="diff --git a/x b/x\n"
+    )
+
+    ctx = cast(_FakeAction, a).calls[0]
+    assert ctx.branch == "DEMO-1-fix"
+    assert ctx.diff == "diff --git a/x b/x\n"
+
+
+async def test_branch_and_diff_default_to_none() -> None:
+    a = _FakeAction(id="a")
+    wf = _wf(actions=[a])
+
+    await WorkflowEngine().dispatch(_manual_event(), [wf])
+
+    ctx = cast(_FakeAction, a).calls[0]
+    assert ctx.branch is None
+    assert ctx.diff is None
+
+
+async def test_branch_and_diff_propagate_to_hooks() -> None:
+    a = _FakeAction(id="a")
+    hook = _FakeAction(id="celebrate")
+    wf = _wf(actions=[a], on_success=[hook])
+
+    await WorkflowEngine().dispatch(
+        _manual_event(), [wf], branch="DEMO-1-fix", diff="diff --git a/x b/x\n"
+    )
+
+    hook_ctx = cast(_FakeAction, hook).calls[0]
+    assert hook_ctx.branch == "DEMO-1-fix"
+    assert hook_ctx.diff == "diff --git a/x b/x\n"
+
+
 def test_build_idempotency_key_is_deterministic() -> None:
     k1 = build_idempotency_key(
         workflow_name="w", issue_id="DEMO-1", to_state="Ready", commit_sha="abc"

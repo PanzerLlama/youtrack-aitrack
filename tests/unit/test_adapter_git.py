@@ -105,6 +105,25 @@ def test_git_executable_not_found_raises() -> None:
         adapter.resolve_branch("X", repo_dir=Path("/tmp"), pattern="x")
 
 
+def test_commit_sha_returns_branch_head(tmp_path: Path) -> None:
+    _init_repo(tmp_path)
+    _make_branch(tmp_path, "feat", "new.txt", "added\n")
+    adapter = GitDiffAdapter()
+    sha = adapter.commit_sha(tmp_path, "feat")
+    assert len(sha) == 40
+    expected = subprocess.run(
+        ["git", "rev-parse", "feat"], cwd=tmp_path, check=True, capture_output=True, text=True
+    ).stdout.strip()
+    assert sha == expected
+
+
+def test_commit_sha_unknown_branch_raises(tmp_path: Path) -> None:
+    _init_repo(tmp_path)
+    adapter = GitDiffAdapter()
+    with pytest.raises(GitDiffError, match="git rev-parse"):
+        adapter.commit_sha(tmp_path, "nope-not-a-branch")
+
+
 def test_resolve_branch_dedupes_local_and_remote(tmp_path: Path) -> None:
     """Same logical branch appearing locally and as a 'remote' ref should count once."""
     _init_repo(tmp_path)

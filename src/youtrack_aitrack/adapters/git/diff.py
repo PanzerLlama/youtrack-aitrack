@@ -32,6 +32,10 @@ class GitDiffAdapter:
         result = self._run(["diff", "--merge-base", base, branch], repo_dir)
         return result.stdout
 
+    def commit_sha(self, repo_dir: Path, branch: str) -> str:
+        result = self._run(["rev-parse", branch], repo_dir)
+        return result.stdout.strip()
+
     def _run(self, args: list[str], repo_dir: Path) -> subprocess.CompletedProcess[str]:
         try:
             return subprocess.run(

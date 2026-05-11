@@ -9,10 +9,15 @@ import pytest
 
 from youtrack_aitrack.adapters.storage.runs import JsonRunStore, JsonRunStoreError
 from youtrack_aitrack.domain.run import ActionResult, RunReport, RunState
+from youtrack_aitrack.engine.idempotency import IdempotencyStore
 from youtrack_aitrack.engine.run_store import RunStore
 
 
 def _accepts_store(s: RunStore) -> RunStore:
+    return s
+
+
+def _accepts_idempotency(s: IdempotencyStore) -> IdempotencyStore:
     return s
 
 
@@ -153,4 +158,69 @@ def test_load_run_ignores_dotfiles(tmp_path: Path) -> None:
     """The cursor file lives next to the date dirs and must not be walked into."""
     store = JsonRunStore(tmp_path)
     store.save_cursor("c")
+    assert store.load_run("anything") is None
+
+
+def test_adapter_satisfies_idempotency_protocol(tmp_path: Path) -> None:
+    store = JsonRunStore(tmp_path)
+    accepted = _accepts_idempotency(store)
+    assert accepted is store
+
+
+def test_has_processed_returns_false_when_file_missing(tmp_path: Path) -> None:
+    store = JsonRunStore(tmp_path)
+    assert store.has_processed("any-key") is False
+
+
+def test_mark_then_has_processed_round_trip(tmp_path: Path) -> None:
+    store = JsonRunStore(tmp_path)
+    store.mark_processed("key-1", "run-abc")
+    assert store.has_processed("key-1") is True
+    assert store.has_processed("key-2") is False
+
+
+def test_mark_processed_persists_across_instances(tmp_path: Path) -> None:
+    JsonRunStore(tmp_path).mark_processed("k", "r")
+    assert JsonRunStore(tmp_path).has_processed("k") is True
+
+
+def test_mark_processed_appends_without_overwriting(tmp_path: Path) -> None:
+    store = JsonRunStore(tmp_path)
+    store.mark_processed("k1", "r1")
+    store.mark_processed("k2", "r2")
+    assert store.has_processed("k1") is True
+    assert store.has_processed("k2") is True
+
+
+def test_mark_processed_atomic_leaves_no_tmp_file(tmp_path: Path) -> None:
+    store = JsonRunStore(tmp_path)
+    store.mark_processed("k", "r")
+    leftovers = list(tmp_path.rglob("*.tmp"))
+    assert leftovers == []
+
+
+def test_corrupt_idempotency_file_raises(tmp_path: Path) -> None:
+    (tmp_path / ".idempotency.json").write_text("{not valid")
+    store = JsonRunStore(tmp_path)
+    with pytest.raises(JsonRunStoreError, match="corrupt idempotency file"):
+        store.has_processed("k")
+
+
+def test_idempotency_unexpected_shape_raises(tmp_path: Path) -> None:
+    (tmp_path / ".idempotency.json").write_text('{"other_key": 1}')
+    store = JsonRunStore(tmp_path)
+    with pytest.raises(JsonRunStoreError, match="unexpected idempotency file shape"):
+        store.has_processed("k")
+
+
+def test_idempotency_non_string_value_raises(tmp_path: Path) -> None:
+    (tmp_path / ".idempotency.json").write_text('{"seen": {"k": 1}}')
+    store = JsonRunStore(tmp_path)
+    with pytest.raises(JsonRunStoreError, match="seen' must map str->str"):
+        store.has_processed("k")
+
+
+def test_load_run_ignores_idempotency_dotfile(tmp_path: Path) -> None:
+    store = JsonRunStore(tmp_path)
+    store.mark_processed("k", "r")
     assert store.load_run("anything") is None

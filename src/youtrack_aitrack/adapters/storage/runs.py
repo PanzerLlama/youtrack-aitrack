@@ -9,6 +9,7 @@ from pathlib import Path
 from youtrack_aitrack.domain.run import RunReport
 
 _CURSOR_FILENAME = ".cursor.json"
+_IDEMPOTENCY_FILENAME = ".idempotency.json"
 
 
 class JsonRunStoreError(RuntimeError):
@@ -56,6 +57,32 @@ class JsonRunStore:
         if value is None or isinstance(value, str):
             return value
         raise JsonRunStoreError(f"cursor must be str or null, got {type(value).__name__}")
+
+    def has_processed(self, key: str) -> bool:
+        return key in self._load_idempotency()
+
+    def mark_processed(self, key: str, run_id: str) -> None:
+        seen = self._load_idempotency()
+        seen[key] = run_id
+        path = self._runs_dir / _IDEMPOTENCY_FILENAME
+        _atomic_write(path, json.dumps({"seen": seen}))
+
+    def _load_idempotency(self) -> dict[str, str]:
+        path = self._runs_dir / _IDEMPOTENCY_FILENAME
+        if not path.is_file():
+            return {}
+        try:
+            data = json.loads(path.read_text())
+        except ValueError as exc:
+            raise JsonRunStoreError(f"corrupt idempotency file: {path}") from exc
+        if not isinstance(data, dict) or "seen" not in data:
+            raise JsonRunStoreError(f"unexpected idempotency file shape: {path}")
+        seen = data["seen"]
+        if not isinstance(seen, dict) or not all(
+            isinstance(k, str) and isinstance(v, str) for k, v in seen.items()
+        ):
+            raise JsonRunStoreError(f"idempotency 'seen' must map str->str: {path}")
+        return dict(seen)
 
 
 def _atomic_write(path: Path, content: str) -> None:

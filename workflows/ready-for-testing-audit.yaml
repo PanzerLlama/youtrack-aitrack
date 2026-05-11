@@ -1,0 +1,47 @@
+name: ready-for-testing-audit
+description: |
+  When a YouTrack issue moves to "Ready for testing", run three parallel
+  AI reports (security audit, pages changed, QA plan) and write each
+  report back to a custom field on the issue. The QA plan depends on
+  pages_changed so it can build a manual test plan scoped to the surfaces
+  the upstream report named.
+
+trigger:
+  type: status_change
+  to_state: "Ready for testing"
+  from_state: "*"
+
+actions:
+  - id: security_audit
+    type: ai_report
+    inputs: [git_diff, task_meta]
+    output: { kind: custom_field, name: "Security Audit" }
+    prompt: security_audit.md
+    model: claude-sonnet-4-6
+
+  - id: pages_changed
+    type: ai_report
+    inputs: [git_diff, task_meta]
+    output: { kind: custom_field, name: "Pages Changed" }
+    prompt: pages_changed.md
+    model: claude-sonnet-4-6
+
+  - id: qa_plan
+    type: ai_report
+    inputs: [task_meta, dependency_outputs]
+    depends_on: [pages_changed]
+    output: { kind: custom_field, name: "QA Plan" }
+    prompt: qa_plan.md
+    model: claude-sonnet-4-6
+
+on_success:
+  - id: mark_done
+    type: set_field
+    fields:
+      "Audit Status": "done"
+
+on_failure:
+  - id: mark_failed
+    type: set_field
+    fields:
+      "Audit Status": "failed"

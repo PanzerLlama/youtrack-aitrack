@@ -44,7 +44,7 @@ class _FakeGit:
         self._resolve_error = resolve_error
         self._diff_error = diff_error
         self.resolve_calls: list[tuple[str, Path, str]] = []
-        self.diff_calls: list[tuple[Path, str]] = []
+        self.diff_calls: list[tuple[Path, str, str]] = []
         self.sha_calls: list[tuple[Path, str]] = []
 
     def resolve_branch(self, task_id: str, *, repo_dir: Path, pattern: str) -> str | None:
@@ -54,7 +54,7 @@ class _FakeGit:
         return self._branch
 
     def diff(self, repo_dir: Path, branch: str, base: str = "main") -> str:
-        self.diff_calls.append((repo_dir, branch))
+        self.diff_calls.append((repo_dir, branch, base))
         if self._diff_error:
             raise GitDiffError("boom")
         return self._diff
@@ -125,12 +125,14 @@ class _FakeRunStore:
         self._idem[key] = run_id
 
 
-def _config(*, base_url: str | None = None) -> InstanceConfig:
+def _config(*, base_url: str | None = None, git_base_branch: str = "main") -> InstanceConfig:
     return InstanceConfig(
         youtrack=YouTrackSection(url="https://yt.example.com", token="t", project="DEMO"),
         anthropic=AnthropicSection(api_key="k"),
         paths=PathsSection(),
-        defaults=DefaultsSection(branch_pattern="{task_id}-*", base_url=base_url),
+        defaults=DefaultsSection(
+            branch_pattern="{task_id}-*", base_url=base_url, git_base_branch=git_base_branch
+        ),
     )
 
 
@@ -152,6 +154,7 @@ def _build(
     run_store: _FakeRunStore | None = None,
     state_lookup: _FakeStateLookup | None = None,
     base_url: str | None = None,
+    git_base_branch: str = "main",
 ) -> tuple[Runner, _FakeLLM, _FakeWriter, _FakeRunStore, _FakeStateLookup]:
     llm = llm or _FakeLLM()
     writer = writer or _FakeWriter()
@@ -160,7 +163,7 @@ def _build(
     factory = ActionFactory(llm=llm, renderer=_FakeRenderer(), writer=writer, poster=_FakePoster())
     workflows = [factory.materialize_workflow(workflow)]
     runner = Runner(
-        config=_config(base_url=base_url),
+        config=_config(base_url=base_url, git_base_branch=git_base_branch),
         workflows=workflows,
         engine=WorkflowEngine(idempotency_store=run_store),
         git_provider=git,
@@ -191,7 +194,7 @@ async def test_dispatch_resolves_branch_diff_sha_and_runs_ai_report() -> None:
 
     assert report.state is RunState.DONE
     assert git.resolve_calls == [("DEMO-1", Path("/tmp/fakerepo"), "{task_id}-*")]
-    assert git.diff_calls == [(Path("/tmp/fakerepo"), "DEMO-1-fix")]
+    assert git.diff_calls == [(Path("/tmp/fakerepo"), "DEMO-1-fix", "main")]
     assert git.sha_calls == [(Path("/tmp/fakerepo"), "DEMO-1-fix")]
     assert len(llm.calls) == 1
     rendered_prompt, model = llm.calls[0]
@@ -309,6 +312,34 @@ async def test_dispatch_forwards_base_url_from_config_to_engine() -> None:
     assert len(llm.calls) == 1
     rendered_prompt, _model = llm.calls[0]
     assert "base_url=https://app.example.com" in rendered_prompt
+
+
+async def test_dispatch_forwards_git_base_branch_to_diff_adapter() -> None:
+    git = _FakeGit()
+    wf = Workflow(
+        name="audit",
+        trigger=ManualTrigger(),
+        actions=[AiReportAction(id="a", inputs=["git_diff"], prompt="p.md", model="m")],
+    )
+    runner, _, _, _, _ = _build(git=git, workflow=wf, git_base_branch="develop")
+
+    await runner.dispatch(_manual_event())
+
+    assert git.diff_calls == [(Path("/tmp/fakerepo"), "DEMO-1-fix", "develop")]
+
+
+async def test_dispatch_uses_main_as_default_git_base_branch() -> None:
+    git = _FakeGit()
+    wf = Workflow(
+        name="audit",
+        trigger=ManualTrigger(),
+        actions=[AiReportAction(id="a", inputs=["git_diff"], prompt="p.md", model="m")],
+    )
+    runner, _, _, _, _ = _build(git=git, workflow=wf)
+
+    await runner.dispatch(_manual_event())
+
+    assert git.diff_calls == [(Path("/tmp/fakerepo"), "DEMO-1-fix", "main")]
 
 
 async def test_dispatch_base_url_none_when_config_unset() -> None:

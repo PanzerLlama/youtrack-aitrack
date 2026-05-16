@@ -63,6 +63,7 @@ class DefaultsSection(BaseModel):
     poll_interval_seconds: int = 60
     poll_lookback_seconds: int = 3600
     base_url: str | None = None
+    git_base_branch: str = "main"
     include_tags: list[str] = Field(default_factory=list)
 
     model_config = ConfigDict(frozen=True)

@@ -112,7 +112,9 @@ class Runner:
         if branch is None:
             return None, None, None, {"git_diff"}
         try:
-            diff = self._git.diff(self._repo_dir, branch)
+            diff = self._git.diff(
+                self._repo_dir, branch, base=self._config.defaults.git_base_branch
+            )
             commit_sha = self._git.commit_sha(self._repo_dir, branch)
         except GitDiffError:
             return branch, None, None, {"git_diff"}

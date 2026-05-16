@@ -1,17 +1,22 @@
 [project]
 name = "youtrack-aitrack"
-version = "0.1.0a0"
+version = "0.1.0b0"
 description = "YAML-driven workflow engine triggering AI-agent actions on YouTrack issue events"
 requires-python = ">=3.12"
 license = { text = "MIT" }
 authors = [{ name = "Lech Buszczynski" }]
 keywords = ["youtrack", "ai", "anthropic", "claude", "workflow", "automation"]
 classifiers = [
-    "Development Status :: 3 - Alpha",
+    "Development Status :: 4 - Beta",
     "Intended Audience :: Developers",
     "License :: OSI Approved :: MIT License",
+    "Operating System :: POSIX :: Linux",
+    "Operating System :: MacOS",
+    "Programming Language :: Python :: 3 :: Only",
     "Programming Language :: Python :: 3.12",
     "Topic :: Software Development :: Quality Assurance",
+    "Topic :: Software Development :: Bug Tracking",
+    "Typing :: Typed",
 ]
 
 dependencies = [
@@ -24,6 +29,12 @@ dependencies = [
     "jinja2>=3.1.0",
     "python-dotenv>=1.0.0",
 ]
+
+[project.urls]
+Homepage = "https://github.com/PanzerLlama/youtrack-aitrack"
+Repository = "https://github.com/PanzerLlama/youtrack-aitrack"
+Issues = "https://github.com/PanzerLlama/youtrack-aitrack/issues"
+Documentation = "https://github.com/PanzerLlama/youtrack-aitrack/tree/main/docs"
 
 [project.scripts]
 youtrack-aitrack = "youtrack_aitrack.cli.main:app"

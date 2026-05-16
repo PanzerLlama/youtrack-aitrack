@@ -43,7 +43,7 @@ def _root(
 @app.command()
 def version() -> None:
     """Print the installed package version."""
-    typer.echo("youtrack-aitrack 0.1.0a0")
+    typer.echo("youtrack-aitrack 0.1.0b0")
 
 
 app.command("init")(init_command)

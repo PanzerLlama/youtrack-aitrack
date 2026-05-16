@@ -1,6 +1,6 @@
 # youtrack-aitrack
 
-> **Status: alpha.** APIs, CLI, and YAML schema may shift before the first stable release. Verified against YouTrack Cloud 2026.1.
+> **Status: beta.** Core daemon path is feature-complete and verified end-to-end against YouTrack Cloud 2026.1. APIs, CLI, and YAML schema may still shift before the first stable release; breaking changes will be called out in the changelog.
 
 A YAML-driven workflow engine that runs AI-agent actions in response to
 YouTrack issue events. Each workflow declares one trigger (e.g. a status

@@ -165,3 +165,54 @@ def test_run_missing_config_yaml_errors(tmp_path: Path) -> None:
     cfg.mkdir()
     result = runner.invoke(app, ["--config-dir", str(cfg), "run", "DEMO-1"])
     assert result.exit_code != 0
+
+
+AI_WORKFLOW = """\
+name: ai-smoke
+trigger:
+  type: status_change
+  to_state: "Ready for testing"
+actions:
+  - id: audit
+    type: ai_report
+    prompt: smoke.md
+    model: claude-sonnet-4-6
+on_success:
+  - id: mark
+    type: set_field
+    fields:
+      Status: "audited"
+"""
+
+
+SMOKE_PROMPT = "Audit issue {{ ctx.issue.issue_id }}."
+
+
+def _write_prompt(cfg: Path, name: str, content: str) -> None:
+    (cfg / "prompts" / name).write_text(content)
+
+
+@respx.mock(base_url=BASE_URL, assert_all_called=False)
+def test_run_stub_llm_skips_anthropic_and_writes_placeholder(
+    respx_mock: respx.MockRouter, tmp_path: Path
+) -> None:
+    cfg = _make_config(tmp_path)
+    _write_workflow(cfg, "ai.yaml", AI_WORKFLOW)
+    _write_prompt(cfg, "smoke.md", SMOKE_PROMPT)
+    _mock_state(respx_mock, "DEMO-1", "Ready for testing")
+    _mock_field_metadata(respx_mock)
+    write_route = respx_mock.post("/api/issues/DEMO-1").mock(
+        return_value=httpx.Response(200, json={"id": "DEMO-1"})
+    )
+    anthropic_route = respx.route(host="api.anthropic.com").mock(
+        return_value=httpx.Response(500, text="should-not-be-called")
+    )
+
+    result = runner.invoke(app, ["--config-dir", str(cfg), "run", "DEMO-1", "--stub-llm"])
+
+    assert result.exit_code == 0, result.output
+    assert not anthropic_route.called
+    # on_success hook fires only if the ai_report action ran successfully under the stub LLM.
+    assert write_route.called
+    body = write_route.calls.last.request.read().decode()
+    assert '"value":"audited"' in body

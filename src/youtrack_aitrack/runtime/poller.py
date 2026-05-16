@@ -78,8 +78,17 @@ def build_poller(
     config_dir: Path,
     *,
     repo_dir: Path | None = None,
+    dry_run: bool = False,
+    stub_llm: bool = False,
 ) -> Poller:
-    w = wire(config, config_dir, repo_dir=repo_dir, dry_run=False, workflow_names=None)
+    w = wire(
+        config,
+        config_dir,
+        repo_dir=repo_dir,
+        dry_run=dry_run,
+        stub_llm=stub_llm,
+        workflow_names=None,
+    )
     runner = Runner(
         config=w.config,
         workflows=w.workflows,

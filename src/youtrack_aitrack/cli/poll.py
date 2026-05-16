@@ -27,6 +27,14 @@ _MAX_ITER_OPTION = typer.Option(
     help="Daemon-only: exit after N iterations. For testing; omit for true daemon.",
     hidden=True,
 )
+_DRY_RUN_OPTION = typer.Option(
+    False, "--dry-run", help="Dispatch as normal but skip YouTrack field writes and comments."
+)
+_STUB_LLM_OPTION = typer.Option(
+    False,
+    "--stub-llm",
+    help="Substitute a placeholder for every Anthropic call (zero LLM cost).",
+)
 
 
 def poll_command(
@@ -35,6 +43,8 @@ def poll_command(
     repo_dir: Path | None = _REPO_DIR_OPTION,
     interval_seconds: float | None = _INTERVAL_OPTION,
     max_iterations: int | None = _MAX_ITER_OPTION,
+    dry_run: bool = _DRY_RUN_OPTION,
+    stub_llm: bool = _STUB_LLM_OPTION,
 ) -> None:
     """Poll YouTrack activity feed and dispatch matching workflows."""
     config_dir: Path = ctx.obj["config_dir"]
@@ -46,7 +56,7 @@ def poll_command(
     except InstanceConfigError as exc:
         raise typer.BadParameter(str(exc)) from exc
 
-    poller = build_poller(config, config_dir, repo_dir=repo_dir)
+    poller = build_poller(config, config_dir, repo_dir=repo_dir, dry_run=dry_run, stub_llm=stub_llm)
     if not daemon:
         result = asyncio.run(poller.poll_once())
         _print_result(result)

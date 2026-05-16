@@ -25,6 +25,7 @@ from youtrack_aitrack.runtime.factory import (
     ActionFactory,
     NoOpCommentPoster,
     NoOpFieldWriter,
+    StubLLMClient,
 )
 
 
@@ -123,10 +124,11 @@ def wire(
     *,
     repo_dir: Path | None = None,
     dry_run: bool = False,
+    stub_llm: bool = False,
     workflow_names: set[str] | None = None,
 ) -> Wiring:
     yt = YouTrackClient(config.youtrack.url, config.youtrack.token, project=config.youtrack.project)
-    llm = AnthropicLLMClient(config.anthropic.api_key)
+    llm = StubLLMClient() if stub_llm else AnthropicLLMClient(config.anthropic.api_key)
     renderer = JinjaPromptRenderer(config.prompts_path(config_dir))
     git = GitDiffAdapter()
     run_store = JsonRunStore(config.runs_path(config_dir))
@@ -154,6 +156,7 @@ def build_runner(
     *,
     repo_dir: Path | None = None,
     dry_run: bool = False,
+    stub_llm: bool = False,
     workflow_names: set[str] | None = None,
 ) -> Runner:
     w = wire(
@@ -161,6 +164,7 @@ def build_runner(
         config_dir,
         repo_dir=repo_dir,
         dry_run=dry_run,
+        stub_llm=stub_llm,
         workflow_names=workflow_names,
     )
     return Runner(

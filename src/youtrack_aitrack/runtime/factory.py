@@ -23,6 +23,26 @@ class NoOpCommentPoster:
         return None
 
 
+class StubLLMClient:
+    """Cost-free LLMClient — returns a marked placeholder instead of calling Anthropic.
+
+    Used by --stub-llm to smoke-test the trigger -> dispatch -> action path without
+    spending tokens. Output includes the requested model and rendered prompt length so
+    users can verify their wiring (model config flowed through; prompt rendered to
+    non-empty content).
+    """
+
+    async def complete(self, prompt: str, model: str) -> str:
+        return (
+            "[STUB LLM] action stub — no real Anthropic call was made.\n"
+            "\n"
+            f"Model requested: {model}\n"
+            f"Prompt length: {len(prompt)} characters\n"
+            "\n"
+            "To get the real report, drop --stub-llm and ensure ANTHROPIC_API_KEY is set."
+        )
+
+
 class ActionFactory:
     def __init__(
         self,

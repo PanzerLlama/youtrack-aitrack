@@ -10,7 +10,7 @@ from youtrack_aitrack.domain.actions.yt_comment import YtCommentAction
 from youtrack_aitrack.domain.context import Context
 from youtrack_aitrack.domain.triggers.manual import ManualTrigger
 from youtrack_aitrack.domain.workflow import Workflow
-from youtrack_aitrack.runtime.factory import ActionFactory
+from youtrack_aitrack.runtime.factory import ActionFactory, StubLLMClient
 
 
 class _FakeLLM:
@@ -106,3 +106,20 @@ def test_materialize_workflow_rewires_all_action_groups() -> None:
     assert bad._writer is writer
     assert rewired.name == "wf"
     assert [a.id for a in rewired.actions] == ["a", "s"]
+
+
+async def test_stub_llm_returns_marked_placeholder_with_model_and_prompt_length() -> None:
+    stub = StubLLMClient()
+    result = await stub.complete("hello world", "claude-sonnet-4-6")
+
+    assert "[STUB LLM]" in result
+    assert "claude-sonnet-4-6" in result
+    assert "Prompt length: 11" in result
+    assert "--stub-llm" in result  # tells user how to disable
+
+
+async def test_stub_llm_is_deterministic() -> None:
+    stub = StubLLMClient()
+    a = await stub.complete("x", "m")
+    b = await stub.complete("x", "m")
+    assert a == b

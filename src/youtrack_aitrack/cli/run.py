@@ -25,6 +25,11 @@ _FORCE_OPTION = typer.Option(False, "--force", help="Bypass idempotency dedup fo
 _REPO_DIR_OPTION = typer.Option(
     None, "--repo-dir", help="Git repo root (default: current working directory)."
 )
+_STUB_LLM_OPTION = typer.Option(
+    False,
+    "--stub-llm",
+    help="Substitute a placeholder for every Anthropic call (zero LLM cost).",
+)
 
 
 def run_command(
@@ -34,6 +39,7 @@ def run_command(
     dry_run: bool = _DRY_RUN_OPTION,
     force: bool = _FORCE_OPTION,
     repo_dir: Path | None = _REPO_DIR_OPTION,
+    stub_llm: bool = _STUB_LLM_OPTION,
 ) -> None:
     """Dispatch workflows for ISSUE_ID matching its current state."""
     config_dir: Path = ctx.obj["config_dir"]
@@ -50,6 +56,7 @@ def run_command(
         config_dir,
         repo_dir=repo_dir,
         dry_run=dry_run,
+        stub_llm=stub_llm,
         workflow_names={workflow} if workflow is not None else None,
     )
     reports = asyncio.run(runner.run(issue_id, force=force))

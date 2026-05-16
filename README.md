@@ -20,6 +20,84 @@ touching the workflow.
 One running daemon binds to one YouTrack project. Multi-project setups use
 multiple instances with separate configs.
 
+## How it works — one dispatch, end to end
+
+Cause: a developer moves an issue to `Ready for testing`. This bit of YAML in
+your config dir is what teaches the daemon to react:
+
+```yaml
+# workflows/ready-for-testing-audit.yaml (excerpt)
+name: ready-for-testing-audit
+trigger:
+  type: status_change
+  to_state: "Ready for testing"
+actions:
+  - id: security_audit
+    type: ai_report
+    output: { kind: custom_field, name: "Security Audit" }
+    prompt: security_audit.md
+    model: claude-sonnet-4-6
+  - id: pages_changed
+    type: ai_report
+    output: { kind: custom_field, name: "Pages Changed" }
+    prompt: pages_changed.md
+    model: claude-sonnet-4-6
+  - id: qa_plan
+    type: ai_report
+    depends_on: [pages_changed]
+    output: { kind: custom_field, name: "QA Plan" }
+    prompt: qa_plan.md
+    model: claude-sonnet-4-6
+on_success:
+  - id: mark_done
+    type: set_field
+    fields: { "Audit Status": "done" }
+```
+
+Effect: the daemon catches the state change on its next poll and runs the
+graph. Independent reports run in parallel; `qa_plan` waits for
+`pages_changed` so it can use its findings. Results land in the issue's
+custom fields. The on-success hook marks the audit done.
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor Dev as Developer
+    participant YT as YouTrack
+    participant D as yta poll --daemon
+    participant G as local git
+    participant E as engine
+    participant AI as Claude
+
+    Dev->>YT: move DEMO-42 → "Ready for testing"
+    D->>YT: poll /api/activitiesPage
+    YT-->>D: state-change event
+    D->>YT: get_issue_tags (tag filter passes)
+    D->>G: resolve branch & diff
+    G-->>D: DEMO-42-fix + diff + commit_sha
+    D->>E: dispatch matching workflow
+
+    par parallel
+        E->>AI: security_audit prompt + diff
+        E->>AI: pages_changed prompt + diff
+    end
+    AI-->>E: Security Audit report
+    AI-->>E: Pages Changed report
+    E->>AI: qa_plan prompt (uses pages_changed output)
+    AI-->>E: QA Plan report
+
+    E->>YT: write Security Audit, Pages Changed, QA Plan custom fields
+    E->>YT: set Audit Status = "done" (on_success hook)
+    Note over D: cursor advances; idempotency key recorded
+```
+
+Every step is also a place where you can intervene: `--dry-run` swaps the
+YouTrack writer for a no-op so nothing lands in YT; `--stub-llm` swaps the
+Anthropic call for a placeholder so nothing costs tokens; `include_tags`
+in config filters which issues the daemon reacts to. See
+[docs/operations.md](./docs/operations.md) for the full set of safety knobs
+and the recommended first-run staircase.
+
 ## Quickstart
 
 Requires Python 3.12+ and [uv](https://docs.astral.sh/uv/).

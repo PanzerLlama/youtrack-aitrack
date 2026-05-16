@@ -1,5 +1,9 @@
 # youtrack-aitrack
 
+[![CI](https://github.com/PanzerLlama/youtrack-aitrack/actions/workflows/ci.yml/badge.svg)](https://github.com/PanzerLlama/youtrack-aitrack/actions/workflows/ci.yml)
+[![Python](https://img.shields.io/badge/python-3.12%2B-blue)](https://www.python.org/downloads/)
+[![License: MIT](https://img.shields.io/badge/license-MIT-green)](./LICENSE)
+
 > **Status: beta.** Core daemon path is feature-complete and verified end-to-end against YouTrack Cloud 2026.1. APIs, CLI, and YAML schema may still shift before the first stable release; breaking changes will be called out in the changelog.
 
 A YAML-driven workflow engine that runs AI-agent actions in response to

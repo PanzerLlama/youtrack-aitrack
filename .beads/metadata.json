@@ -1,7 +1,0 @@
-{
-  "database": "dolt",
-  "backend": "dolt",
-  "dolt_mode": "embedded",
-  "dolt_database": "youtrack_aitrack",
-  "project_id": "a26cf8fa-9c31-4709-8006-97a3331c3229"
-}

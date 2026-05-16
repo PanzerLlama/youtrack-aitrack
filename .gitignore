@@ -40,11 +40,13 @@ Thumbs.db
 .env.*.local
 .youtrack-aitrack-state/
 
-# Beads / Dolt (managed by bd init)
+# Beads / Dolt (local-only issue tracker; not shared via the public repo).
+# Beads tracking history stays in your local .beads/ directory; if you want to
+# adopt bd as your tracker in a fork, run `bd init` to create a fresh database.
+.beads/
 .dolt/
 *.db
 .beads-credential-key
-# bd ships its own .beads/.gitignore for local DB and runtime files
 
 # Claude Code per-user overrides (project settings.json is tracked)
 .claude/settings.local.json

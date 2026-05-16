@@ -30,6 +30,7 @@ paths:
 defaults:
   branch_pattern: "{task_id}-*"
   poll_interval_seconds: 60
+  poll_lookback_seconds: 3600              # first-poll window (1h); subsequent polls use cursor
   # base_url: https://staging.example.com   # optional; enables clickable URLs in pages_changed
   # include_tags: [daemon-test, backend]    # optional; empty/absent = process all issues
 """

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import time
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
@@ -35,10 +36,12 @@ class YouTrackClient:
         token: str,
         *,
         project: str,
+        poll_lookback_seconds: int = 3600,
         http: httpx.AsyncClient | None = None,
     ) -> None:
         self._base = base_url.rstrip("/")
         self._project = project
+        self._lookback_seconds = poll_lookback_seconds
         self._http = http or httpx.AsyncClient(
             headers={
                 "Authorization": f"Bearer {token}",
@@ -98,6 +101,10 @@ class YouTrackClient:
         }
         if cursor is not None:
             params["cursor"] = cursor
+        else:
+            # YouTrack /api/activitiesPage returns nothing when neither cursor nor
+            # start is supplied. On first poll we look back N seconds (configurable).
+            params["start"] = str(int(time.time() * 1000) - self._lookback_seconds * 1000)
         url = f"{self._base}/api/activitiesPage"
         resp = await self._http.get(url, params=params)
         _check(resp)

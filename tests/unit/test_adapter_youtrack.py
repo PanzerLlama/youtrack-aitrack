@@ -214,6 +214,27 @@ async def test_changed_issues_since_non_state_event_skips_state_fields(
 
 
 @respx.mock(base_url=BASE_URL)
+async def test_changed_issues_since_passes_start_when_cursor_is_none(
+    respx_mock: respx.MockRouter,
+) -> None:
+    route = respx_mock.get("/api/activitiesPage").mock(
+        return_value=httpx.Response(200, json={"afterCursor": "cur-new", "activities": []})
+    )
+
+    client = YouTrackClient(BASE_URL, "test-token", project=PROJECT, poll_lookback_seconds=1800)
+    events, cursor = await client.changed_issues_since(None)
+
+    assert events == []
+    assert cursor == "cur-new"
+    sent = route.calls.last.request.url.params
+    assert "cursor" not in sent
+    assert "start" in sent
+    # The 'start' should be a numeric ms timestamp within the last hour.
+    start_ms = int(sent["start"])
+    assert start_ms > 0
+
+
+@respx.mock(base_url=BASE_URL)
 async def test_changed_issues_since_passes_cursor_param(
     respx_mock: respx.MockRouter,
 ) -> None:

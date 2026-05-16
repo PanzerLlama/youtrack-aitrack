@@ -128,7 +128,12 @@ def wire(
     stub_llm: bool = False,
     workflow_names: set[str] | None = None,
 ) -> Wiring:
-    yt = YouTrackClient(config.youtrack.url, config.youtrack.token, project=config.youtrack.project)
+    yt = YouTrackClient(
+        config.youtrack.url,
+        config.youtrack.token,
+        project=config.youtrack.project,
+        poll_lookback_seconds=config.defaults.poll_lookback_seconds,
+    )
     llm = StubLLMClient() if stub_llm else AnthropicLLMClient(config.anthropic.api_key)
     renderer = JinjaPromptRenderer(config.prompts_path(config_dir))
     git = GitDiffAdapter()

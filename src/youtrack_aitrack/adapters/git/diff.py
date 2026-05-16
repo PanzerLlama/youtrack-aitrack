@@ -18,7 +18,9 @@ class GitDiffAdapter:
 
     def resolve_branch(self, task_id: str, *, repo_dir: Path, pattern: str) -> str | None:
         glob = pattern.replace("{task_id}", task_id)
-        result = self._run(["branch", "--list", "--all", glob], repo_dir)
+        # --end-of-options stops git from treating an argument starting with '-' as a flag,
+        # regardless of arg position. Hardening against task_id values like '--help'.
+        result = self._run(["branch", "--list", "--all", "--end-of-options", glob], repo_dir)
         names = _parse_branch_list(result.stdout)
         if not names:
             return None
@@ -29,11 +31,13 @@ class GitDiffAdapter:
         return names[0]
 
     def diff(self, repo_dir: Path, branch: str, base: str = "main") -> str:
-        result = self._run(["diff", "--merge-base", base, branch], repo_dir)
+        result = self._run(["diff", "--merge-base", "--end-of-options", base, branch], repo_dir)
         return result.stdout
 
     def commit_sha(self, repo_dir: Path, branch: str) -> str:
-        result = self._run(["rev-parse", branch], repo_dir)
+        # --verify makes rev-parse output only the resolved SHA (without it,
+        # rev-parse echoes every positional arg, including --end-of-options).
+        result = self._run(["rev-parse", "--verify", "--end-of-options", branch], repo_dir)
         return result.stdout.strip()
 
     def _run(self, args: list[str], repo_dir: Path) -> subprocess.CompletedProcess[str]:

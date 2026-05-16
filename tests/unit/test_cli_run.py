@@ -160,6 +160,17 @@ def test_run_force_bypasses_idempotency(respx_mock: respx.MockRouter, tmp_path: 
     assert write_route.call_count == 2
 
 
+def test_run_rejects_malformed_issue_id(tmp_path: Path) -> None:
+    cfg = _make_config(tmp_path)
+    # Note: typer intercepts '--help' and '--version' itself; we test inputs that
+    # reach our validator: shell-metacharacter-bearing, path-traversal-shaped,
+    # or otherwise non-conforming-to-YouTrack-id-shape strings.
+    for bad in ("../etc/passwd", "1-2", "DEMO", "DEMO-", "DEMO-abc", "--end-of-options"):
+        result = runner.invoke(app, ["--config-dir", str(cfg), "run", "--", bad])
+        assert result.exit_code != 0, f"expected rejection for {bad!r}: {result.output}"
+        assert "invalid issue id" in (result.output + (result.stderr or ""))
+
+
 def test_run_missing_config_yaml_errors(tmp_path: Path) -> None:
     cfg = tmp_path / "empty"
     cfg.mkdir()

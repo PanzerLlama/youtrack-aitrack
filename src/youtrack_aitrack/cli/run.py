@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import re
 from pathlib import Path
 
 import typer
@@ -13,6 +14,11 @@ from youtrack_aitrack.config import (
 )
 from youtrack_aitrack.domain.run import ActionResult, RunReport, RunState
 from youtrack_aitrack.runtime import build_runner
+
+# YouTrack issue IDs are <PROJECT>-<NUMBER> where project is alphanumeric and
+# starts with a letter. We validate at the CLI boundary so the value can never
+# be interpreted as a git flag or a URL path component.
+_ISSUE_ID_RE = re.compile(r"^[A-Za-z][A-Za-z0-9_]*-\d+$")
 
 _ISSUE_ID_ARG = typer.Argument(..., help="YouTrack issue id, e.g. DEMO-42.")
 _WORKFLOW_OPTION = typer.Option(
@@ -42,6 +48,10 @@ def run_command(
     stub_llm: bool = _STUB_LLM_OPTION,
 ) -> None:
     """Dispatch workflows for ISSUE_ID matching its current state."""
+    if not _ISSUE_ID_RE.match(issue_id):
+        raise typer.BadParameter(
+            f"invalid issue id {issue_id!r}; expected <PROJECT>-<NUMBER>, e.g. DEMO-42"
+        )
     config_dir: Path = ctx.obj["config_dir"]
     config_yaml = config_dir / "config.yaml"
     if not config_yaml.is_file():

@@ -105,6 +105,27 @@ def test_git_executable_not_found_raises() -> None:
         adapter.resolve_branch("X", repo_dir=Path("/tmp"), pattern="x")
 
 
+def test_resolve_branch_rejects_glob_starting_with_dash(tmp_path: Path) -> None:
+    """A task_id like '--help' must not be interpreted by git as a flag.
+
+    --end-of-options on git 2.24+ guarantees positional args are never parsed as flags.
+    """
+    _init_repo(tmp_path)
+    adapter = GitDiffAdapter()
+    # Even with a benign-looking task_id starting with '-', resolve_branch must
+    # treat it as a pattern (which will simply not match anything), not a flag.
+    assert adapter.resolve_branch("--help", repo_dir=tmp_path, pattern="{task_id}") is None
+
+
+def test_diff_rejects_branch_starting_with_dash(tmp_path: Path) -> None:
+    _init_repo(tmp_path)
+    adapter = GitDiffAdapter()
+    # base='--all' would, without --end-of-options, be parsed as `git diff --all`.
+    # With the hardening, git treats it as a revision (which doesn't exist) and errors.
+    with pytest.raises(GitDiffError):
+        adapter.diff(tmp_path, "--also-flag-like", base="--flag-like")
+
+
 def test_commit_sha_returns_branch_head(tmp_path: Path) -> None:
     _init_repo(tmp_path)
     _make_branch(tmp_path, "feat", "new.txt", "added\n")

@@ -12,12 +12,18 @@ import httpx
 from youtrack_aitrack.adapters.youtrack.errors import YouTrackError
 from youtrack_aitrack.domain.event import STATE_FIELD_NAME, IssueEvent
 
+# YouTrack /api/activitiesPage returns a page wrapper {activities, afterCursor, beforeCursor};
+# the fields= query selects keys from the *top-level* response, so activity-level fields must
+# be wrapped in activities(...) and afterCursor/beforeCursor must be requested explicitly.
 _ACTIVITY_FIELDS = (
+    "activities("
     "id,timestamp,category(id),"
     "author(login),"
     "target(idReadable,project(shortName)),"
     "field(name,customField(name)),"
     "added(name),removed(name)"
+    "),"
+    "afterCursor,beforeCursor"
 )
 _FIELD_METADATA_FIELDS = "id,$type,field(name)"
 _DEFAULT_TIMEOUT = 30.0

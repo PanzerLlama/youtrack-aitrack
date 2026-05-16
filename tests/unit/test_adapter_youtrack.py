@@ -235,6 +235,30 @@ async def test_changed_issues_since_passes_start_when_cursor_is_none(
 
 
 @respx.mock(base_url=BASE_URL)
+async def test_changed_issues_since_wraps_activity_fields_for_paginated_endpoint(
+    respx_mock: respx.MockRouter,
+) -> None:
+    """Regression: YouTrack /activitiesPage requires fields=activities(...),afterCursor.
+
+    The bare 'fields=id,timestamp,...' shape selects top-level page wrapper keys, so
+    YouTrack returns {$type, id} without any 'activities' array. Verify the fields
+    param wraps activity-level keys in activities(...) and asks for afterCursor.
+    """
+    route = respx_mock.get("/api/activitiesPage").mock(
+        return_value=httpx.Response(200, json={"afterCursor": "c", "activities": []})
+    )
+
+    client = _make_client()
+    await client.changed_issues_since("cur-prev")
+
+    sent_fields = route.calls.last.request.url.params["fields"]
+    assert "activities(" in sent_fields
+    assert "afterCursor" in sent_fields
+    # Activity-level keys must be inside the activities(...) wrapper.
+    assert sent_fields.startswith("activities(")
+
+
+@respx.mock(base_url=BASE_URL)
 async def test_changed_issues_since_passes_cursor_param(
     respx_mock: respx.MockRouter,
 ) -> None:

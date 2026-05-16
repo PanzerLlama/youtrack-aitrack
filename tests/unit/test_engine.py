@@ -470,6 +470,107 @@ async def test_branch_and_diff_propagate_to_hooks() -> None:
     assert hook_ctx.diff == "diff --git a/x b/x\n"
 
 
+# --- OutputSink phase ---
+
+
+class _SinkAction(ActionSpec):
+    """Test action whose result includes an ``output['text']`` to be sunk."""
+
+    type: Literal["_sink"] = "_sink"
+    text: str = "rendered"
+
+    async def execute(self, ctx: Context) -> ActionResult:
+        return ActionResult(
+            action_id=self.id,
+            success=True,
+            output={"text": self.text, "model": "stub"},
+        )
+
+
+class _CapturingSink:
+    def __init__(self, *, fail: bool = False) -> None:
+        self.calls: list[tuple[str, Any, str]] = []
+        self._fail = fail
+
+    async def write(self, *, issue_id: str, spec: Any, value: str) -> None:
+        if self._fail:
+            raise RuntimeError("sink boom")
+        self.calls.append((issue_id, spec, value))
+
+
+async def test_output_sink_writes_for_each_action_with_output_spec() -> None:
+    from youtrack_aitrack.domain.output import CustomFieldOutput
+
+    a = _SinkAction(id="a", text="report-a", output=CustomFieldOutput(name="Security Audit"))
+    b = _SinkAction(id="b", text="report-b", output=CustomFieldOutput(name="QA Plan"))
+    wf = _wf(actions=[a, b])
+    sink = _CapturingSink()
+    engine = WorkflowEngine(output_sink=sink)
+
+    [report] = await engine.dispatch(_manual_event(), [wf])
+
+    assert report.state is RunState.DONE
+    assert len(sink.calls) == 2
+    by_value = {c[2]: c for c in sink.calls}
+    assert by_value["report-a"][0] == "DEMO-1"
+    assert by_value["report-a"][1].name == "Security Audit"
+    assert by_value["report-b"][1].name == "QA Plan"
+
+
+async def test_output_sink_skipped_for_actions_without_output_spec() -> None:
+    a = _FakeAction(id="a")  # no OutputSpec, no text in result
+    wf = _wf(actions=[a])
+    sink = _CapturingSink()
+    engine = WorkflowEngine(output_sink=sink)
+
+    await engine.dispatch(_manual_event(), [wf])
+
+    assert sink.calls == []
+
+
+async def test_output_sink_skipped_for_failed_actions() -> None:
+    from youtrack_aitrack.domain.output import CustomFieldOutput
+
+    fail = _FakeAction(id="fail", succeed=False, output=CustomFieldOutput(name="X"))
+    wf = _wf(actions=[fail], on_failure=[_FakeAction(id="cleanup")])
+    sink = _CapturingSink()
+    engine = WorkflowEngine(output_sink=sink)
+
+    [report] = await engine.dispatch(_manual_event(), [wf])
+
+    assert report.state is RunState.FAILED
+    assert sink.calls == []
+
+
+async def test_output_sink_failure_fails_workflow_and_triggers_on_failure() -> None:
+    from youtrack_aitrack.domain.output import CustomFieldOutput
+
+    a = _SinkAction(id="a", text="t", output=CustomFieldOutput(name="X"))
+    cleanup = _FakeAction(id="cleanup")
+    success_hook = _FakeAction(id="celebrate")
+    wf = _wf(actions=[a], on_success=[success_hook], on_failure=[cleanup])
+    sink = _CapturingSink(fail=True)
+    engine = WorkflowEngine(output_sink=sink)
+
+    [report] = await engine.dispatch(_manual_event(), [wf])
+
+    assert report.state is RunState.FAILED
+    assert [r.action_id for r in report.hook_results] == ["cleanup"]
+    assert cast(_FakeAction, success_hook).calls == []
+
+
+async def test_no_output_sink_means_no_writes_attempted() -> None:
+    from youtrack_aitrack.domain.output import CustomFieldOutput
+
+    a = _SinkAction(id="a", text="t", output=CustomFieldOutput(name="X"))
+    wf = _wf(actions=[a])
+    engine = WorkflowEngine()  # no output_sink
+
+    [report] = await engine.dispatch(_manual_event(), [wf])
+
+    assert report.state is RunState.DONE
+
+
 def test_build_idempotency_key_is_deterministic() -> None:
     k1 = build_idempotency_key(
         workflow_name="w", issue_id="DEMO-1", to_state="Ready", commit_sha="abc"

@@ -6,6 +6,7 @@ from youtrack_aitrack.domain.action import ActionSpec
 from youtrack_aitrack.domain.actions.ai_report import AiReportAction, LLMClient, PromptRenderer
 from youtrack_aitrack.domain.actions.set_field import FieldWriter, SetFieldAction
 from youtrack_aitrack.domain.actions.yt_comment import CommentPoster, YtCommentAction
+from youtrack_aitrack.domain.output import CommentOutput, CustomFieldOutput
 from youtrack_aitrack.domain.workflow import Workflow
 
 
@@ -21,6 +22,26 @@ class NoOpCommentPoster:
 
     async def post_comment(self, issue_id: str, body: str) -> None:
         return None
+
+
+class StandardOutputSink:
+    """Dispatches OutputSpec writes to the appropriate adapter by ``spec.kind``.
+
+    Holds the same FieldWriter / CommentPoster the ActionFactory uses, so swapping in
+    NoOp adapters (dry-run) automatically suppresses output writes too.
+    """
+
+    def __init__(self, *, writer: FieldWriter, poster: CommentPoster) -> None:
+        self._writer = writer
+        self._poster = poster
+
+    async def write(
+        self, *, issue_id: str, spec: CustomFieldOutput | CommentOutput, value: str
+    ) -> None:
+        if isinstance(spec, CustomFieldOutput):
+            await self._writer.set_fields(issue_id, {spec.name: value})
+        elif isinstance(spec, CommentOutput):
+            await self._poster.post_comment(issue_id, value)
 
 
 class StubLLMClient:

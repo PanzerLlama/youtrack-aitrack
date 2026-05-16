@@ -4,6 +4,7 @@ from youtrack_aitrack.runtime.factory import (
     ActionFactory,
     NoOpCommentPoster,
     NoOpFieldWriter,
+    StandardOutputSink,
     StubLLMClient,
 )
 from youtrack_aitrack.runtime.poller import Poller, PollResult, build_poller
@@ -23,6 +24,7 @@ __all__ = [
     "PollResult",
     "Poller",
     "Runner",
+    "StandardOutputSink",
     "StubLLMClient",
     "build_poller",
     "build_runner",

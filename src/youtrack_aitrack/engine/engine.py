@@ -8,6 +8,7 @@ from typing import cast
 from youtrack_aitrack.domain.action import Action, ActionSpec
 from youtrack_aitrack.domain.context import Context
 from youtrack_aitrack.domain.event import IssueEvent
+from youtrack_aitrack.domain.output import OutputSink
 from youtrack_aitrack.domain.run import ActionResult, RunReport, RunState
 from youtrack_aitrack.domain.trigger import Trigger
 from youtrack_aitrack.domain.workflow import Workflow
@@ -15,8 +16,14 @@ from youtrack_aitrack.engine.idempotency import IdempotencyStore, build_idempote
 
 
 class WorkflowEngine:
-    def __init__(self, *, idempotency_store: IdempotencyStore | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        idempotency_store: IdempotencyStore | None = None,
+        output_sink: OutputSink | None = None,
+    ) -> None:
         self._idempotency = idempotency_store
+        self._output_sink = output_sink
 
     async def dispatch(
         self,
@@ -99,6 +106,11 @@ class WorkflowEngine:
             diff=diff,
             base_url=base_url,
         )
+        output_error: str | None = None
+        if not failed and self._output_sink is not None:
+            output_error = await _write_outputs(workflow.actions, outputs, event, self._output_sink)
+            if output_error is not None:
+                failed = True
         hook_specs = workflow.on_failure if failed else workflow.on_success
         hook_results = await _execute_hooks(
             hook_specs, event, outputs, branch=branch, diff=diff, base_url=base_url
@@ -213,3 +225,29 @@ def _coerce_result(action_id: str, res: ActionResult | BaseException) -> ActionR
     if isinstance(res, BaseException):
         return ActionResult(action_id=action_id, success=False, error=str(res))
     return res
+
+
+async def _write_outputs(
+    specs: list[ActionSpec],
+    outputs: dict[str, ActionResult],
+    event: IssueEvent,
+    sink: OutputSink,
+) -> str | None:
+    """Persist each action's ``output['text']`` to its declared OutputSpec sink.
+
+    Returns None on success, or an error string on the first failure (rest are skipped).
+    """
+    for spec in specs:
+        if spec.output is None:
+            continue
+        result = outputs.get(spec.id)
+        if result is None or not result.success or result.skipped:
+            continue
+        value = (result.output or {}).get("text")
+        if not isinstance(value, str):
+            continue
+        try:
+            await sink.write(issue_id=event.issue_id, spec=spec.output, value=value)
+        except Exception as exc:
+            return f"output sink failed for action {spec.id!r}: {exc}"
+    return None

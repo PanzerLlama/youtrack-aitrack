@@ -175,13 +175,9 @@ trigger:
 actions:
   - id: audit
     type: ai_report
+    output: { kind: custom_field, name: "Security Audit" }
     prompt: smoke.md
     model: claude-sonnet-4-6
-on_success:
-  - id: mark
-    type: set_field
-    fields:
-      Status: "audited"
 """
 
 
@@ -200,7 +196,18 @@ def test_run_stub_llm_skips_anthropic_and_writes_placeholder(
     _write_workflow(cfg, "ai.yaml", AI_WORKFLOW)
     _write_prompt(cfg, "smoke.md", SMOKE_PROMPT)
     _mock_state(respx_mock, "DEMO-1", "Ready for testing")
-    _mock_field_metadata(respx_mock)
+    respx_mock.get(f"/api/admin/projects/{PROJECT}/customFields").mock(
+        return_value=httpx.Response(
+            200,
+            json=[
+                {
+                    "id": "PF-1",
+                    "$type": "TextProjectCustomField",
+                    "field": {"name": "Security Audit"},
+                }
+            ],
+        )
+    )
     write_route = respx_mock.post("/api/issues/DEMO-1").mock(
         return_value=httpx.Response(200, json={"id": "DEMO-1"})
     )
@@ -212,7 +219,10 @@ def test_run_stub_llm_skips_anthropic_and_writes_placeholder(
 
     assert result.exit_code == 0, result.output
     assert not anthropic_route.called
-    # on_success hook fires only if the ai_report action ran successfully under the stub LLM.
+    # Output sink writes the ai_report text to the declared custom field.
     assert write_route.called
     body = write_route.calls.last.request.read().decode()
-    assert '"value":"audited"' in body
+    assert "[STUB LLM]" in body
+    assert "claude-sonnet-4-6" in body
+    # YouTrack field-write payload uses the resolved field id (PF-1), not the name.
+    assert '"id":"PF-1"' in body

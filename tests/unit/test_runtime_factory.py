@@ -8,9 +8,14 @@ from youtrack_aitrack.domain.actions.ai_report import AiReportAction
 from youtrack_aitrack.domain.actions.set_field import SetFieldAction
 from youtrack_aitrack.domain.actions.yt_comment import YtCommentAction
 from youtrack_aitrack.domain.context import Context
+from youtrack_aitrack.domain.output import CommentOutput, CustomFieldOutput
 from youtrack_aitrack.domain.triggers.manual import ManualTrigger
 from youtrack_aitrack.domain.workflow import Workflow
-from youtrack_aitrack.runtime.factory import ActionFactory, StubLLMClient
+from youtrack_aitrack.runtime.factory import (
+    ActionFactory,
+    StandardOutputSink,
+    StubLLMClient,
+)
 
 
 class _FakeLLM:
@@ -123,3 +128,33 @@ async def test_stub_llm_is_deterministic() -> None:
     a = await stub.complete("x", "m")
     b = await stub.complete("x", "m")
     assert a == b
+
+
+async def test_standard_output_sink_custom_field_writes_via_field_writer() -> None:
+    writer = _FakeWriter()
+    poster = _FakePoster()
+    sink = StandardOutputSink(writer=writer, poster=poster)
+
+    await sink.write(
+        issue_id="DEMO-1",
+        spec=CustomFieldOutput(name="Security Audit"),
+        value="audit body",
+    )
+
+    assert writer.calls == [("DEMO-1", {"Security Audit": "audit body"})]
+    assert poster.calls == []
+
+
+async def test_standard_output_sink_comment_writes_via_comment_poster() -> None:
+    writer = _FakeWriter()
+    poster = _FakePoster()
+    sink = StandardOutputSink(writer=writer, poster=poster)
+
+    await sink.write(
+        issue_id="DEMO-1",
+        spec=CommentOutput(),
+        value="comment body",
+    )
+
+    assert poster.calls == [("DEMO-1", "comment body")]
+    assert writer.calls == []

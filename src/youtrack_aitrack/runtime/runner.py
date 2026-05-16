@@ -25,6 +25,7 @@ from youtrack_aitrack.runtime.factory import (
     ActionFactory,
     NoOpCommentPoster,
     NoOpFieldWriter,
+    StandardOutputSink,
     StubLLMClient,
 )
 
@@ -138,7 +139,11 @@ def wire(
     workflows = [
         factory.materialize_workflow(w) for w in _load_workflows(config, config_dir, workflow_names)
     ]
-    engine = WorkflowEngine(idempotency_store=_as_idempotency_store(run_store))
+    output_sink = StandardOutputSink(writer=writer, poster=poster)
+    engine = WorkflowEngine(
+        idempotency_store=_as_idempotency_store(run_store),
+        output_sink=output_sink,
+    )
     return Wiring(
         config=config,
         yt=yt,

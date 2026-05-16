@@ -396,6 +396,29 @@ async def test_get_issue_state_raises_on_4xx(respx_mock: respx.MockRouter) -> No
 
 
 @respx.mock(base_url=BASE_URL)
+async def test_error_body_is_truncated_and_sanitized(respx_mock: respx.MockRouter) -> None:
+    """Long or control-char-bearing response bodies must not flow verbatim into the
+    YouTrackError message (which propagates to ActionResult.error on disk)."""
+    nasty = "A" * 300 + "\x00\x01\x02\nbeep\x07"
+    respx_mock.get(f"/api/admin/projects/{PROJECT}/customFields").mock(
+        return_value=httpx.Response(403, text=nasty)
+    )
+
+    client = _make_client()
+    with pytest.raises(YouTrackError) as exc:
+        await client.set_fields("DEMO-1", {"Owner": "x"})
+
+    msg = str(exc.value)
+    # Truncated to 200 chars of content
+    assert "A" * 201 not in msg
+    # No control characters leak through
+    assert "\x00" not in msg
+    assert "\x07" not in msg
+    # Indicator that we cut it short
+    assert "[truncated]" in msg
+
+
+@respx.mock(base_url=BASE_URL)
 async def test_4xx_response_raises_typed_error(respx_mock: respx.MockRouter) -> None:
     respx_mock.get(f"/api/admin/projects/{PROJECT}/customFields").mock(
         return_value=httpx.Response(403, text="forbidden")

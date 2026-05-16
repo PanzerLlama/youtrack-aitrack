@@ -204,9 +204,25 @@ def _parse_timestamp(raw: Any) -> datetime:
     raise YouTrackError(f"activity timestamp missing or non-numeric: {raw!r}")
 
 
+_ERROR_BODY_MAX_CHARS = 200
+
+
 def _check(resp: httpx.Response) -> None:
     if resp.is_success:
         return
+    # Response bodies can include attacker-influenceable text (custom field names,
+    # comment fragments) that ends up persisted to disk via ActionResult.error.
+    # Truncate hard and strip control chars so the on-disk error message stays
+    # short and printable.
+    safe_body = _sanitize_error_body(resp.text)
     raise YouTrackError(
-        f"YouTrack {resp.request.method} {resp.request.url}: {resp.status_code} {resp.text[:500]}"
+        f"YouTrack {resp.request.method} {resp.request.url}: {resp.status_code} {safe_body}"
     )
+
+
+def _sanitize_error_body(body: str) -> str:
+    truncated = body[:_ERROR_BODY_MAX_CHARS]
+    cleaned = "".join(c if (c.isprintable() or c in "\t ") else "?" for c in truncated)
+    if len(body) > _ERROR_BODY_MAX_CHARS:
+        cleaned += "...[truncated]"
+    return cleaned

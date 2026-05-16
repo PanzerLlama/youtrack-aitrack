@@ -161,6 +161,32 @@ Symptoms we've seen in practice and what causes them:
 | Daemon shows `events=0` indefinitely | First-poll lookback window missed your transitions, or token lacks activity-feed permission | Check `defaults.poll_lookback_seconds`; verify with a direct `curl` against `/api/activitiesPage` |
 | Reports written but fields stay empty in YouTrack | Old version before output-sink fix shipped | Reinstall: `uv tool install --from git+... --force` |
 
+## Security and trust assumptions
+
+Before running this in a production environment, know what's trusted and
+what isn't:
+
+- **Run one daemon per host per instance.** Idempotency is tracked in a
+  local JSON file with no inter-process locking. If two daemons (or one
+  daemon plus a manual `yta run`) process the same event concurrently,
+  you may get duplicate dispatches. The single-daemon model is the
+  supported configuration.
+- **AI report output is advisory, not authoritative.** Diffs are
+  attacker-influenceable: anyone who can commit to a feature branch can
+  insert prompt-injection content aimed at manipulating the generated
+  audit/QA reports. The adapter framing reduces this risk but does not
+  eliminate it. Reviewers should always verify findings against the
+  diff itself before acting on them.
+- **No safe-by-default for first runs.** `yta run` without flags will
+  hit Anthropic (costs tokens) and write to YouTrack. Use the testing
+  staircase above before pointing the daemon at production issues.
+- **Per-issue field type support is narrow.** v1 supports YouTrack
+  `Simple` (string) and `Text` field types only. Enum, state, user,
+  build, and other types are rejected with a typed error.
+- **Tokens never end up on disk.** The YouTrack token and Anthropic key
+  are passed through HTTP headers only; they are not logged, not echoed
+  in error messages, not included in run reports.
+
 ## Where to look for clues
 
 - `~/.youtrack-aitrack/runs/<date>/*.json` — every dispatch leaves a full `RunReport` JSON with each action's input/output. Pretty-print with `jq`.

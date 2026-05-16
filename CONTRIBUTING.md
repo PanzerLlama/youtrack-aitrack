@@ -1,15 +1,15 @@
 # Contributing to youtrack-aitrack
 
-Thanks for the interest in helping. This project is alpha and moves in small,
-atomic steps — please read the rules below before opening a PR.
+Thanks for the interest in helping. This project is in beta and moves in
+small, atomic steps — please read the rules below before opening a PR.
 
 ## Architecture and anti-drift rules
 
-The architecture (hexagonal: `domain` / `engine` / `registry` / `adapters`)
-and the per-module / per-function size and purity rules are documented in
-[CLAUDE.md](./CLAUDE.md). The "Anti-drift rules for AI agents" section there
-applies to human contributors too — they are the rules that keep multi-author
-sessions coherent.
+The architecture (hexagonal: `domain` / `engine` / `registry` / `adapters` /
+`runtime`) and the per-module / per-function size and purity rules are
+documented in [CLAUDE.md](./CLAUDE.md). The "Anti-drift rules for AI agents"
+section there applies to human contributors too — they are the rules that
+keep multi-author sessions coherent.
 
 In short:
 
@@ -20,44 +20,36 @@ In short:
 - No `# TODO` / `# FIXME` left in committed code — file an issue.
 - Match existing naming. Singular module names by default.
 
-## Issue tracking — beads
+## Issue tracking
 
-Issue tracking lives in this repo via [beads (`bd`)](https://github.com/sfultong/beads),
-not GitHub Issues. Run `bd prime` after `bd init` for the full command
-reference. Day-to-day:
+External bug reports and feature requests go through GitHub Issues using
+the [bug](./.github/ISSUE_TEMPLATE/bug.md) and
+[feature](./.github/ISSUE_TEMPLATE/feature.md) templates. Security issues
+follow the disclosure flow in [SECURITY.md](./SECURITY.md) — please don't
+report security findings as public issues.
 
-```bash
-bd ready                  # List unblocked work
-bd show <id>              # View the issue
-bd update <id> --claim    # Claim it
-bd update <id> --status=in_progress
-bd close <id>             # When the work is committed
-```
-
-Create the issue **before** writing the code so the description stays honest
-about scope and motivation.
+The project maintainers use [beads (`bd`)](https://github.com/sfultong/beads)
+locally for granular issue tracking; that database is not shipped with the
+repo. Outside contributors do not need to install bd.
 
 ## Pull requests
 
-1. Branch from `main` (or `master` while the project is single-branch).
-2. Reference the beads issue id in the commit message and PR description.
-3. Keep the diff focused on one issue. Split unrelated work into separate
-   issues and PRs.
-4. Run the quality gates locally before pushing — see below.
+1. Open a related GitHub issue first (or comment on an existing one) so the
+   scope is visible before the diff lands.
+2. Branch from `main`. Keep the diff focused on one issue.
+3. Run the quality gates locally before pushing — see below.
+4. Fill in the PR template; it walks you through what reviewers will check.
 
 ## Quickstart on a fresh checkout
-
-After cloning, run the bootstrap script once:
 
 ```bash
 ./scripts/setup-dev.sh
 ```
 
 This installs `uv` (via the official Astral installer if missing), installs
-the project Python and dependencies, wires `core.hooksPath` to the
-bd-managed pre-commit chain, verifies the hook integrity, and runs every
-CI gate locally as a smoke test. Re-running it is safe — each step is
-idempotent.
+the project Python and dependencies, installs the pre-commit hooks via
+`pre-commit install`, and runs every CI gate locally as a smoke test. The
+script is idempotent — re-run it any time.
 
 ## Quality gates
 
@@ -75,18 +67,13 @@ All four pass on every commit. CI runs the same set on every PR and push to
 
 ## Adding a trigger or action type
 
-A new trigger lives in `src/youtrack_aitrack/domain/triggers/` as a single
-file, registered with `@register_trigger("<name>")` and re-exported from the
-sibling `__init__.py`. Actions follow the same pattern under
-`domain/actions/`. Real I/O lives in adapters under
-`src/youtrack_aitrack/adapters/`; the action class injects adapter
-dependencies via its constructor and calls them via `Protocol` interfaces
-declared next to the action. See the existing `ai_report`, `yt_comment`, and
-`set_field` action stubs for the pattern.
+See [docs/architecture.md](./docs/architecture.md#adding-a-new-trigger-type)
+for the step-by-step recipes for new triggers, actions, and adapters. Each
+is one new file in `domain/` plus a registry import, no engine changes.
 
 ## Reporting issues
 
-External bug reports and feature requests are welcome on the project's GitHub
-issue tracker once the repository is published. Reproduction steps and the
-output of `youtrack-aitrack workflows validate` are usually enough to
-diagnose configuration problems.
+External bug reports and feature requests are welcome via GitHub Issues.
+Reproduction steps, your `yta version`, and the output of
+`yta workflows validate` are usually enough to diagnose configuration
+problems. For security findings, see [SECURITY.md](./SECURITY.md).

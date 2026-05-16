@@ -33,19 +33,11 @@ uv python install
 step "uv sync"
 uv sync
 
-# 3. Wire git hooks to the bd-managed directory so the pre-commit chain fires.
-HOOKS_DIR="$REPO_ROOT/.beads/hooks"
-CURRENT="$(git config --get core.hooksPath || true)"
-if [ "$CURRENT" != "$HOOKS_DIR" ]; then
-    step "Setting git core.hooksPath to $HOOKS_DIR"
-    git config core.hooksPath "$HOOKS_DIR"
-fi
+# 3. Install pre-commit hooks (ruff + mypy + pytest run on commit).
+step "Installing pre-commit hooks"
+uv run pre-commit install
 
-# 4. Verify the bd-managed hook still chains pre-commit.
-step "Verifying hook chain"
-"$REPO_ROOT/scripts/verify-hooks.sh"
-
-# 5. Smoke test: run every CI gate locally.
+# 4. Smoke test: run every CI gate locally.
 step "Smoke test: ruff check"
 uv run ruff check
 step "Smoke test: ruff format --check"
@@ -55,4 +47,4 @@ uv run mypy src
 step "Smoke test: pytest"
 uv run pytest
 
-printf "\n✓ Dev environment ready. Run 'bd ready' to pick up work.\n"
+printf "\n✓ Dev environment ready.\n"

@@ -94,5 +94,6 @@ def _print_result(result: PollResult) -> None:
     fired = sum(len(r.action_results) for r in result.reports)
     typer.echo(
         f"poll: cursor {result.cursor_before!r} -> {result.cursor_after!r} "
-        f"events={result.event_count} workflows_fired={len(result.reports)} actions_run={fired}"
+        f"events={result.event_count} filtered={result.events_filtered} "
+        f"workflows_fired={len(result.reports)} actions_run={fired}"
     )

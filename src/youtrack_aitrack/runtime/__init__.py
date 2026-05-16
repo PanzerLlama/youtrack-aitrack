@@ -7,7 +7,12 @@ from youtrack_aitrack.runtime.factory import (
     StandardOutputSink,
     StubLLMClient,
 )
-from youtrack_aitrack.runtime.poller import Poller, PollResult, build_poller
+from youtrack_aitrack.runtime.poller import (
+    IssueTagsLookup,
+    Poller,
+    PollResult,
+    build_poller,
+)
 from youtrack_aitrack.runtime.runner import (
     ActivityFeed,
     IssueStateLookup,
@@ -19,6 +24,7 @@ __all__ = [
     "ActionFactory",
     "ActivityFeed",
     "IssueStateLookup",
+    "IssueTagsLookup",
     "NoOpCommentPoster",
     "NoOpFieldWriter",
     "PollResult",

@@ -125,10 +125,23 @@ def _state_event(issue_id: str, to_state: str) -> IssueEvent:
     )
 
 
+class _FakeTagsLookup:
+    def __init__(self, *, tags_per_issue: dict[str, list[str]] | None = None) -> None:
+        self._tags = tags_per_issue or {}
+        self.calls: list[str] = []
+
+    async def get_issue_tags(self, issue_id: str) -> list[str]:
+        self.calls.append(issue_id)
+        return list(self._tags.get(issue_id, []))
+
+
 def _build_poller(
     feed: _FakeFeed,
     run_store: _RunStore,
     writer: _FakeWriter,
+    *,
+    tags_lookup: _FakeTagsLookup | None = None,
+    include_tags: list[str] | None = None,
 ) -> Poller:
     wf = Workflow(
         name="audit",
@@ -148,7 +161,13 @@ def _build_poller(
         run_store=run_store,
         state_lookup=_FakeStateLookup(),
     )
-    return Poller(runner=runner, run_store=run_store, activity_feed=feed)
+    return Poller(
+        runner=runner,
+        run_store=run_store,
+        activity_feed=feed,
+        tags_lookup=tags_lookup or _FakeTagsLookup(),
+        include_tags=include_tags,
+    )
 
 
 async def test_poll_once_dispatches_events_and_saves_cursor() -> None:
@@ -165,6 +184,7 @@ async def test_poll_once_dispatches_events_and_saves_cursor() -> None:
     assert result.cursor_before is None
     assert result.cursor_after == "cur-2"
     assert result.event_count == 2
+    assert result.events_filtered == 0
     # Only the first event matches the trigger (to_state="Ready for testing").
     assert writer.calls == [("DEMO-1", {"Status": "audited"})]
     assert len(result.reports) == 1
@@ -199,6 +219,59 @@ async def test_poll_loop_runs_max_iterations_and_exits() -> None:
     assert iterations == 2
     assert run_store.cursor_history == ["c1", "c2"]
     assert len(results) == 2
+
+
+async def test_poll_once_empty_include_tags_skips_tag_lookup_entirely() -> None:
+    events = [_state_event("DEMO-1", "Ready for testing")]
+    feed = _FakeFeed([(events, "cur-x")])
+    run_store = _RunStore()
+    writer = _FakeWriter()
+    tags = _FakeTagsLookup()
+    poller = _build_poller(feed, run_store, writer, tags_lookup=tags, include_tags=[])
+
+    await poller.poll_once()
+
+    # No include_tags configured -> no API calls to fetch tags.
+    assert tags.calls == []
+    assert writer.calls == [("DEMO-1", {"Status": "audited"})]
+
+
+async def test_poll_once_filters_events_whose_tags_dont_overlap() -> None:
+    events = [
+        _state_event("DEMO-1", "Ready for testing"),
+        _state_event("DEMO-2", "Ready for testing"),
+    ]
+    feed = _FakeFeed([(events, "cur-x")])
+    run_store = _RunStore()
+    writer = _FakeWriter()
+    tags = _FakeTagsLookup(
+        tags_per_issue={
+            "DEMO-1": ["daemon-test", "frontend"],
+            "DEMO-2": ["frontend"],
+        }
+    )
+    poller = _build_poller(feed, run_store, writer, tags_lookup=tags, include_tags=["daemon-test"])
+
+    result = await poller.poll_once()
+
+    assert result.event_count == 2
+    assert result.events_filtered == 1
+    # Only DEMO-1 has the daemon-test tag.
+    assert writer.calls == [("DEMO-1", {"Status": "audited"})]
+
+
+async def test_poll_once_filters_when_issue_has_no_tags() -> None:
+    events = [_state_event("DEMO-1", "Ready for testing")]
+    feed = _FakeFeed([(events, "cur-x")])
+    run_store = _RunStore()
+    writer = _FakeWriter()
+    tags = _FakeTagsLookup(tags_per_issue={"DEMO-1": []})
+    poller = _build_poller(feed, run_store, writer, tags_lookup=tags, include_tags=["daemon-test"])
+
+    result = await poller.poll_once()
+
+    assert result.events_filtered == 1
+    assert writer.calls == []
 
 
 async def test_poll_loop_stop_event_short_circuits() -> None:

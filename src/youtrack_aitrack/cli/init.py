@@ -30,6 +30,8 @@ paths:
 defaults:
   branch_pattern: "{task_id}-*"
   poll_interval_seconds: 60
+  # base_url: https://staging.example.com   # optional; enables clickable URLs in pages_changed
+  # include_tags: [daemon-test, backend]    # optional; empty/absent = process all issues
 """
 
 ENV_EXAMPLE_TEMPLATE = """\

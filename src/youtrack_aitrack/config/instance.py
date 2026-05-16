@@ -62,6 +62,7 @@ class DefaultsSection(BaseModel):
     branch_pattern: str = "{task_id}-*"
     poll_interval_seconds: int = 60
     base_url: str | None = None
+    include_tags: list[str] = Field(default_factory=list)
 
     model_config = ConfigDict(frozen=True)
 

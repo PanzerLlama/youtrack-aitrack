@@ -312,6 +312,36 @@ async def test_get_issue_state_returns_none_when_value_null(
 
 
 @respx.mock(base_url=BASE_URL)
+async def test_get_issue_tags_returns_list_of_names(respx_mock: respx.MockRouter) -> None:
+    respx_mock.get("/api/issues/DEMO-1").mock(
+        return_value=httpx.Response(
+            200,
+            json={"tags": [{"name": "daemon-test"}, {"name": "backend"}]},
+        )
+    )
+
+    client = _make_client()
+    assert await client.get_issue_tags("DEMO-1") == ["daemon-test", "backend"]
+
+
+@respx.mock(base_url=BASE_URL)
+async def test_get_issue_tags_returns_empty_when_no_tags(respx_mock: respx.MockRouter) -> None:
+    respx_mock.get("/api/issues/DEMO-1").mock(return_value=httpx.Response(200, json={"tags": []}))
+
+    client = _make_client()
+    assert await client.get_issue_tags("DEMO-1") == []
+
+
+@respx.mock(base_url=BASE_URL)
+async def test_get_issue_tags_raises_on_4xx(respx_mock: respx.MockRouter) -> None:
+    respx_mock.get("/api/issues/DEMO-1").mock(return_value=httpx.Response(403, text="nope"))
+
+    client = _make_client()
+    with pytest.raises(YouTrackError, match="403"):
+        await client.get_issue_tags("DEMO-1")
+
+
+@respx.mock(base_url=BASE_URL)
 async def test_get_issue_state_raises_on_4xx(respx_mock: respx.MockRouter) -> None:
     respx_mock.get("/api/issues/DEMO-1").mock(return_value=httpx.Response(404, text="missing"))
 

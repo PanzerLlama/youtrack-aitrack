@@ -64,6 +64,17 @@ class YouTrackClient:
         resp = await self._http.post(url, params={"fields": "id"}, json={"text": body})
         _check(resp)
 
+    async def get_issue_tags(self, issue_id: str) -> list[str]:
+        url = f"{self._base}/api/issues/{issue_id}"
+        resp = await self._http.get(url, params={"fields": "tags(name)"})
+        _check(resp)
+        tags: list[str] = []
+        for tag in resp.json().get("tags", []) or []:
+            name = tag.get("name") if isinstance(tag, dict) else None
+            if isinstance(name, str):
+                tags.append(name)
+        return tags
+
     async def get_issue_state(self, issue_id: str) -> str | None:
         url = f"{self._base}/api/issues/{issue_id}"
         resp = await self._http.get(url, params={"fields": "customFields(name,value(name))"})

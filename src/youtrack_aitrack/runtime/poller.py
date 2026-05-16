@@ -6,6 +6,7 @@ import asyncio
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Protocol
 
 from youtrack_aitrack.config.instance import InstanceConfig
 from youtrack_aitrack.domain.run import RunReport
@@ -13,11 +14,16 @@ from youtrack_aitrack.engine.run_store import RunStore
 from youtrack_aitrack.runtime.runner import ActivityFeed, Runner, wire
 
 
+class IssueTagsLookup(Protocol):
+    async def get_issue_tags(self, issue_id: str) -> list[str]: ...
+
+
 @dataclass(frozen=True)
 class PollResult:
     cursor_before: str | None
     cursor_after: str | None
     event_count: int
+    events_filtered: int
     reports: list[RunReport]
 
 
@@ -28,24 +34,37 @@ class Poller:
         runner: Runner,
         run_store: RunStore,
         activity_feed: ActivityFeed,
+        tags_lookup: IssueTagsLookup,
+        include_tags: list[str] | None = None,
     ) -> None:
         self._runner = runner
         self._run_store = run_store
         self._feed = activity_feed
+        self._tags_lookup = tags_lookup
+        self._include_tags: set[str] = set(include_tags or [])
 
     async def poll_once(self) -> PollResult:
         cursor_before = self._run_store.load_cursor()
         events, cursor_after = await self._feed.changed_issues_since(cursor_before)
         reports: list[RunReport] = []
+        filtered = 0
         for event in events:
+            if self._include_tags and not await self._event_matches_tags(event.issue_id):
+                filtered += 1
+                continue
             reports.extend(await self._runner.dispatch(event))
         self._run_store.save_cursor(cursor_after)
         return PollResult(
             cursor_before=cursor_before,
             cursor_after=cursor_after,
             event_count=len(events),
+            events_filtered=filtered,
             reports=reports,
         )
+
+    async def _event_matches_tags(self, issue_id: str) -> bool:
+        tags = await self._tags_lookup.get_issue_tags(issue_id)
+        return any(t in self._include_tags for t in tags)
 
     async def poll_loop(
         self,
@@ -98,4 +117,10 @@ def build_poller(
         run_store=w.run_store,
         state_lookup=w.yt,
     )
-    return Poller(runner=runner, run_store=w.run_store, activity_feed=w.yt)
+    return Poller(
+        runner=runner,
+        run_store=w.run_store,
+        activity_feed=w.yt,
+        tags_lookup=w.yt,
+        include_tags=list(config.defaults.include_tags),
+    )

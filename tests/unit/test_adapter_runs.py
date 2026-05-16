@@ -89,6 +89,13 @@ def test_load_unknown_run_returns_none_when_runs_dir_missing(tmp_path: Path) -> 
     assert store.load_run("any") is None
 
 
+def test_load_run_rejects_path_traversal_run_id(tmp_path: Path) -> None:
+    """run_id flows into a path component; reject metachars defensively."""
+    store = JsonRunStore(tmp_path)
+    for bad in ("../etc/passwd", "/abs/path", "a/b", "a\\b", "..", "a.b"):
+        assert store.load_run(bad) is None, f"expected reject for {bad!r}"
+
+
 def test_load_run_scans_multiple_date_dirs(tmp_path: Path) -> None:
     (tmp_path / "2026-05-09").mkdir(parents=True)
     (tmp_path / "2026-05-10").mkdir(parents=True)

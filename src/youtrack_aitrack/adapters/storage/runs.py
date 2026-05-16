@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -10,6 +11,10 @@ from youtrack_aitrack.domain.run import RunReport
 
 _CURSOR_FILENAME = ".cursor.json"
 _IDEMPOTENCY_FILENAME = ".idempotency.json"
+# run_id flows into a path component. Reject any character that could cause
+# directory traversal or escape the runs root. uuid4 hex (the canonical shape
+# produced by RunReport) matches; alphanumeric + `_-` test fixtures match too.
+_RUN_ID_RE = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
 
 
 class JsonRunStoreError(RuntimeError):
@@ -26,6 +31,8 @@ class JsonRunStore:
         _atomic_write(path, report.model_dump_json())
 
     def load_run(self, run_id: str) -> RunReport | None:
+        if not _RUN_ID_RE.match(run_id):
+            return None
         if not self._runs_dir.is_dir():
             return None
         for date_dir in sorted(self._runs_dir.iterdir(), reverse=True):

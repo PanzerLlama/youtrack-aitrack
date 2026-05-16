@@ -27,4 +27,10 @@ class JinjaPromptRenderer:
             raise FileNotFoundError(
                 f"prompt template not found: {self._prompts_dir / template}"
             ) from exc
-        return tmpl.render(ctx=ctx.model_dump())
+        # ctx.issue.raw is the full YouTrack activity payload (attacker-influenced
+        # custom field values, comment text, etc.). Strip it before rendering so a
+        # template can't accidentally pass that content into the LLM prompt.
+        dump = ctx.model_dump()
+        if isinstance(dump.get("issue"), dict):
+            dump["issue"].pop("raw", None)
+        return tmpl.render(ctx=dump)

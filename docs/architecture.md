@@ -150,6 +150,49 @@ that declare a missing input get marked `skipped`. Downstream actions that
 `{workflow_name}|{issue_id}|{to_state}|{commit_sha}`. Same composite key
 never dispatches twice; `--force` bypasses.
 
+## Why engine-driven, not LLM-driven
+
+`youtrack-aitrack` is deliberately NOT a YouTrack MCP server. An MCP server
+hands YouTrack tools to an LLM and lets the LLM decide which tools to call,
+in what order, in response to a human's natural-language request. That works
+well for one-off "audit this issue" interactions but it's the wrong shape
+for an autonomous daemon. Three concrete reasons motivate every key pattern
+above:
+
+**Determinism over flexibility.** A workflow YAML pins the action graph at
+load time. The engine executes it the same way for every dispatch matching
+the trigger. This is why actions are first-class data (`ActionSpec` pydantic
+models) and the engine is pure Python — no LLM reasoning step lives between
+"event arrives" and "actions run". An LLM-driven dispatch could choose
+different actions each time, which is exactly what you want for interactive
+help and exactly what you don't want for a daemon.
+
+**Bounded cost per dispatch.** With idempotency keys and a pinned action
+graph, you can predict the cost of one state transition: N `ai_report`
+actions × diff size. An LLM choosing tools could, in principle, call
+`get_issue` 50 times in a loop because it got confused. The `Action`
+protocol's narrow API (`execute(ctx) -> ActionResult`) and the
+output-sink convention (`output["text"]`) are what make the per-dispatch
+cost legible.
+
+**Auditable runs.** Every dispatch produces one `RunReport` JSON file with
+every `ActionResult.output` recorded. You can `jq` over a year of runs to
+answer "did the security_audit ever flag X?". A conversation log produced by
+an LLM running tools is much harder to query — the structure is implicit.
+
+The trade-off is: workflows must be expressible as a YAML graph. If your
+need is "give Claude my YouTrack and let it figure things out on each
+request", build (or use) a YouTrack MCP server — it's a better tool for
+that job. The two could even coexist on the same instance: the daemon
+handles state transitions autonomously, the MCP server handles interactive
+asks. They don't compete; they solve different halves of the LLM-meets-YT
+problem space.
+
+A future MCP wrapper over `yta run` is plausible as a thin adapter — it
+would let a human ask Claude "run the audit workflow on DEMO-42" via MCP
+and have Claude shell out to the same `Runner.run(issue_id)` path the CLI
+uses. The engine stays pinned; only the trigger surface widens.
+
 ## End-to-end trace: `yta poll --daemon` fires for an event
 
 1. CLI (`cli/poll.py`) resolves config, calls `build_poller(config, config_dir)`.

@@ -28,6 +28,33 @@ touching the workflow.
 One running daemon binds to one YouTrack project. Multi-project setups use
 multiple instances with separate configs.
 
+## How this differs from a YouTrack MCP server
+
+A YouTrack MCP server exposes YouTrack operations as tools that an LLM
+(Claude in your IDE, ChatGPT, etc.) can call when a human asks it to do
+something. The LLM is in the driver's seat: a person types "audit DEMO-42",
+the LLM picks which tools to call and in what order, and one conversation
+produces one outcome.
+
+`youtrack-aitrack` solves a different problem: running fixed workflows
+automatically, without a person in the loop. A state transition on the
+YouTrack side is the trigger; a YAML file is the recipe; an event loop is
+the runtime. The LLM is a worker that executes one well-defined action
+inside a larger graph, not a planner choosing what to do.
+
+| Aspect | MCP server | youtrack-aitrack |
+|---|---|---|
+| Who triggers a run | Human asking the LLM | YouTrack state change (or `yta run`) |
+| Who decides the steps | The LLM, each call | A workflow YAML, pinned up front |
+| Multi-step orchestration | LLM threads it together | Engine: `depends_on`, hooks, idempotency |
+| Runs without a person at the keyboard | No | Yes — that's the point |
+| Auditable history | Conversation log | RunReport JSON per dispatch |
+| Cost shape | Open-ended (LLM may call N tools) | Bounded per dispatch (idempotency-keyed) |
+
+The two approaches are complementary, not competing. A future MCP wrapper
+around `yta run` would let a human manually trigger workflows via Claude in
+their IDE — useful, but separate from what the daemon does.
+
 ## How it works — one dispatch, end to end
 
 Cause: a developer moves an issue to `Ready for testing`. This bit of YAML in

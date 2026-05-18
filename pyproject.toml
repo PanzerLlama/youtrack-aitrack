@@ -1,7 +1,7 @@
 [project]
 name = "youtrack-aitrack"
-version = "0.1.0b0"
-description = "YAML-driven workflow engine triggering AI-agent actions on YouTrack issue events"
+version = "0.2.0b0"
+description = "Vendor-agnostic AI agent orchestrator for YouTrack issue events"
 requires-python = ">=3.12"
 license = { text = "MIT" }
 authors = [{ name = "Lech Buszczynski" }]

@@ -8,6 +8,16 @@ file before upgrading.
 
 ## [Unreleased]
 
+## [0.2.0b0] — 2026-05-18
+
+This release pivots the AI-agent backend from "single Anthropic SDK
+client" to a vendor-agnostic `AgentRunner` Protocol. The same engine
+now drives both the SDK path and a new subprocess-based path that
+spawns the local Claude Code CLI per action. Workflow YAML gains a
+per-action `agent:` field; instance config gains a registry-driven
+`default_agent`. No changes are required to the reference workflow
+YAML to keep using the SDK backend.
+
 ### Added
 
 - **Vendor-agnostic agent backend**. `AgentRunner` Protocol in
@@ -138,5 +148,6 @@ verified end-to-end against YouTrack Cloud 2026.1.
 - v1 of `--stub-llm` and `--dry-run` are opt-in. A fresh `yta run` with
   no flags hits Anthropic and writes to YouTrack.
 
-[Unreleased]: https://github.com/PanzerLlama/youtrack-aitrack/compare/v0.1.0b0...HEAD
+[Unreleased]: https://github.com/PanzerLlama/youtrack-aitrack/compare/v0.2.0b0...HEAD
+[0.2.0b0]: https://github.com/PanzerLlama/youtrack-aitrack/compare/v0.1.0b0...v0.2.0b0
 [0.1.0b0]: https://github.com/PanzerLlama/youtrack-aitrack/releases/tag/v0.1.0b0

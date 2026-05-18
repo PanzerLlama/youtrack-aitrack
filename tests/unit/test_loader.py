@@ -102,6 +102,32 @@ actions:
     assert a.model == "claude-sonnet-4-6"
 
 
+def test_load_workflow_parses_agent_field_when_present(tmp_path: Path) -> None:
+    text = """
+name: agent-test
+trigger: { type: manual }
+actions:
+  - id: a1
+    type: ai_report
+    prompt: p
+    model: m
+    agent: claude_code_cli
+"""
+    path = _write(tmp_path, "wf.yaml", text)
+    wf = load_workflow(path, env={})
+    a = wf.actions[0]
+    assert isinstance(a, AiReportAction)
+    assert a.agent == "claude_code_cli"
+
+
+def test_load_workflow_agent_defaults_to_none_when_absent(tmp_path: Path) -> None:
+    path = _write(tmp_path, "wf.yaml", VALID_YAML)
+    wf = load_workflow(path, env={})
+    a = wf.actions[0]
+    assert isinstance(a, AiReportAction)
+    assert a.agent is None
+
+
 # --- failure modes ---
 
 

@@ -89,6 +89,33 @@ async def test_ai_report_uses_injected_llm_and_renderer() -> None:
     assert result.output == {"text": "stub-output", "model": "claude-sonnet-4-6"}
 
 
+def test_ai_report_agent_defaults_to_none() -> None:
+    a = AiReportAction(id="a1", prompt="p", model="m")
+    assert a.agent is None
+
+
+def test_ai_report_accepts_agent_backend_name() -> None:
+    a = AiReportAction(id="a1", prompt="p", model="m", agent="claude_code_cli")
+    assert a.agent == "claude_code_cli"
+
+
+@pytest.mark.asyncio
+async def test_ai_report_agent_field_does_not_alter_execute() -> None:
+    llm = _RecordingLLM()
+    renderer = _RecordingRenderer()
+    a = AiReportAction(
+        id="a1",
+        prompt="p",
+        model="m",
+        agent="claude_code_cli",
+        llm=llm,
+        renderer=renderer,
+    )
+    result = await a.execute(_ctx())
+    assert llm.calls == [("rendered::p", "m")]
+    assert result.output == {"text": "stub-output", "model": "m"}
+
+
 # --- YtCommentAction ---
 
 

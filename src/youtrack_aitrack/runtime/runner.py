@@ -2,18 +2,21 @@
 
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Protocol
 
+from youtrack_aitrack.adapters.cli.claude_code import ClaudeCodeCliRunner
 from youtrack_aitrack.adapters.git.diff import GitDiffAdapter, GitDiffError
-from youtrack_aitrack.adapters.llm.anthropic import AnthropicLLMClient
+from youtrack_aitrack.adapters.llm.anthropic import AnthropicAgentRunner, AnthropicLLMClient
 from youtrack_aitrack.adapters.llm.jinja import JinjaPromptRenderer
 from youtrack_aitrack.adapters.storage.runs import JsonRunStore
 from youtrack_aitrack.adapters.youtrack.client import YouTrackClient
 from youtrack_aitrack.config.instance import InstanceConfig
 from youtrack_aitrack.config.loader import load_workflow
+from youtrack_aitrack.domain.agent_runner import AgentRunner
 from youtrack_aitrack.domain.event import IssueEvent
 from youtrack_aitrack.domain.inputs import GitDiffProvider
 from youtrack_aitrack.domain.run import RunReport
@@ -26,7 +29,7 @@ from youtrack_aitrack.runtime.factory import (
     NoOpCommentPoster,
     NoOpFieldWriter,
     StandardOutputSink,
-    StubLLMClient,
+    StubAgentRunner,
 )
 
 
@@ -137,13 +140,20 @@ def wire(
         project=config.youtrack.project,
         poll_lookback_seconds=config.defaults.poll_lookback_seconds,
     )
-    llm = StubLLMClient() if stub_llm else AnthropicLLMClient(config.anthropic.api_key)
+    agents = _build_agents(config, stub_llm=stub_llm)
     renderer = JinjaPromptRenderer(config.prompts_path(config_dir))
     git = GitDiffAdapter()
     run_store = JsonRunStore(config.runs_path(config_dir))
     writer = NoOpFieldWriter() if dry_run else yt
     poster = NoOpCommentPoster() if dry_run else yt
-    factory = ActionFactory(llm=llm, renderer=renderer, writer=writer, poster=poster)
+    factory = ActionFactory(
+        agents=agents,
+        default_agent=config.defaults.default_agent,
+        renderer=renderer,
+        writer=writer,
+        poster=poster,
+        agent_timeout_seconds=float(config.defaults.agent_timeout_seconds),
+    )
     workflows = [
         factory.materialize_workflow(w) for w in _load_workflows(config, config_dir, workflow_names)
     ]
@@ -207,3 +217,23 @@ def _load_workflows(
 
 def _as_idempotency_store(store: JsonRunStore) -> IdempotencyStore:
     return store
+
+
+def _build_agents(config: InstanceConfig, *, stub_llm: bool) -> dict[str, AgentRunner]:
+    """Construct the AgentRunner registry for this instance.
+
+    With ``stub_llm=True`` every registered backend is the same StubAgentRunner
+    so workflows can be exercised without spending tokens or shelling out, no
+    matter which ``agent`` they declare. Otherwise both real backends are
+    registered eagerly; the CLI runner's subprocess is only spawned on actual
+    invocation, so registering it costs nothing if no workflow uses it.
+    """
+    if stub_llm:
+        stub = StubAgentRunner()
+        return {"anthropic_api": stub, "claude_code_cli": stub}
+    anthropic_runner = AnthropicAgentRunner(
+        AnthropicLLMClient(config.anthropic.api_key),
+        default_model=config.anthropic.default_model,
+    )
+    cli_runner = ClaudeCodeCliRunner(asyncio.Semaphore(config.defaults.cli_agent_concurrency))
+    return {"anthropic_api": anthropic_runner, "claude_code_cli": cli_runner}

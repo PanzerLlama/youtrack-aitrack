@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 from youtrack_aitrack.domain.action import ActionSpec
-from youtrack_aitrack.domain.actions.ai_report import AiReportAction, LLMClient, PromptRenderer
+from youtrack_aitrack.domain.actions.ai_report import AiReportAction, PromptRenderer
 from youtrack_aitrack.domain.actions.set_field import FieldWriter, SetFieldAction
 from youtrack_aitrack.domain.actions.yt_comment import CommentPoster, YtCommentAction
+from youtrack_aitrack.domain.agent_runner import AgentResult, AgentRunner
 from youtrack_aitrack.domain.output import CommentOutput, CustomFieldOutput
 from youtrack_aitrack.domain.workflow import Workflow
 
@@ -44,45 +47,77 @@ class StandardOutputSink:
             await self._poster.post_comment(issue_id, value)
 
 
-class StubLLMClient:
-    """Cost-free LLMClient — returns a marked placeholder instead of calling Anthropic.
+class StubAgentRunner:
+    """Cost-free AgentRunner — returns a marked placeholder instead of invoking a backend.
 
     Used by --stub-llm to smoke-test the trigger -> dispatch -> action path without
-    spending tokens. Output includes the requested model and rendered prompt length so
-    users can verify their wiring (model config flowed through; prompt rendered to
-    non-empty content).
+    spending tokens or shelling out. Output echoes the request fields so users can
+    verify their wiring (model flowed through, prompt rendered to non-empty content,
+    repo + commit context plumbed correctly).
     """
 
-    async def complete(self, prompt: str, model: str) -> str:
-        return (
-            "[STUB LLM] action stub — no real Anthropic call was made.\n"
+    async def run(
+        self,
+        prompt: str,
+        *,
+        cwd: Path,
+        commit_sha: str | None,
+        timeout_s: float,
+        model: str | None = None,
+    ) -> AgentResult:
+        body = (
+            "[STUB AGENT] action stub — no real agent backend was invoked.\n"
             "\n"
             f"Model requested: {model}\n"
             f"Prompt length: {len(prompt)} characters\n"
+            f"Working dir: {cwd}\n"
+            f"Commit SHA: {commit_sha}\n"
             "\n"
-            "To get the real report, drop --stub-llm and ensure ANTHROPIC_API_KEY is set."
+            "To get the real report, drop --stub-llm and ensure the configured "
+            "agent backend is reachable."
         )
+        return AgentResult(output=body, exit_code=0, duration_s=0.0, model_used=model)
 
 
 class ActionFactory:
     def __init__(
         self,
         *,
-        llm: LLMClient,
+        agents: dict[str, AgentRunner],
+        default_agent: str,
         renderer: PromptRenderer,
         writer: FieldWriter,
         poster: CommentPoster,
+        agent_timeout_seconds: float = 300.0,
     ) -> None:
-        self._llm = llm
+        if default_agent not in agents:
+            raise ValueError(
+                f"default_agent {default_agent!r} not in agent registry: {sorted(agents)}"
+            )
+        self._agents = agents
+        self._default_agent = default_agent
         self._renderer = renderer
         self._writer = writer
         self._poster = poster
+        self._timeout_s = agent_timeout_seconds
 
     def materialize(self, spec: ActionSpec) -> ActionSpec:
         data = spec.model_dump()
         match spec.type:
             case "ai_report":
-                return AiReportAction(**data, llm=self._llm, renderer=self._renderer)
+                name = data.get("agent") or self._default_agent
+                runner = self._agents.get(name)
+                if runner is None:
+                    raise ValueError(
+                        f"ai_report action {spec.id!r} requests agent {name!r}, "
+                        f"not in registry: {sorted(self._agents)}"
+                    )
+                return AiReportAction(
+                    **data,
+                    runner=runner,
+                    renderer=self._renderer,
+                    timeout_s=self._timeout_s,
+                )
             case "set_field":
                 return SetFieldAction(**data, writer=self._writer)
             case "yt_comment":

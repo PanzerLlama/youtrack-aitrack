@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from pathlib import Path
 
 import pytest
 
@@ -11,19 +12,22 @@ import youtrack_aitrack.domain.actions  # noqa: F401
 from youtrack_aitrack.domain.actions.ai_report import AiReportAction
 from youtrack_aitrack.domain.actions.set_field import SetFieldAction
 from youtrack_aitrack.domain.actions.yt_comment import YtCommentAction
+from youtrack_aitrack.domain.agent_runner import AgentResult, AgentRunnerError
 from youtrack_aitrack.domain.context import Context
 from youtrack_aitrack.domain.event import IssueEvent
 from youtrack_aitrack.registry import action_registry
 
 
-def _ctx() -> Context:
+def _ctx(*, commit_sha: str | None = None, repo_path: Path | None = None) -> Context:
     return Context(
         issue=IssueEvent(
             issue_id="DEMO-1",
             project="DEMO",
             event_kind="manual",
             timestamp=datetime(2026, 5, 9, tzinfo=UTC),
-        )
+        ),
+        commit_sha=commit_sha,
+        repo_path=repo_path,
     )
 
 
@@ -45,13 +49,32 @@ def test_set_field_registered() -> None:
 # --- AiReportAction ---
 
 
-class _RecordingLLM:
-    def __init__(self) -> None:
-        self.calls: list[tuple[str, str]] = []
+class _RecordingAgentRunner:
+    def __init__(self, *, raise_on_run: AgentRunnerError | None = None) -> None:
+        self.calls: list[dict[str, object]] = []
+        self._raise = raise_on_run
 
-    async def complete(self, prompt: str, model: str) -> str:
-        self.calls.append((prompt, model))
-        return "stub-output"
+    async def run(
+        self,
+        prompt: str,
+        *,
+        cwd: Path,
+        commit_sha: str | None,
+        timeout_s: float,
+        model: str | None = None,
+    ) -> AgentResult:
+        self.calls.append(
+            {
+                "prompt": prompt,
+                "cwd": cwd,
+                "commit_sha": commit_sha,
+                "timeout_s": timeout_s,
+                "model": model,
+            }
+        )
+        if self._raise is not None:
+            raise self._raise
+        return AgentResult(output="stub-output", exit_code=0, duration_s=0.0, model_used=model)
 
 
 class _RecordingRenderer:
@@ -73,20 +96,55 @@ async def test_ai_report_default_stubs_are_no_op() -> None:
 
 
 @pytest.mark.asyncio
-async def test_ai_report_uses_injected_llm_and_renderer() -> None:
-    llm = _RecordingLLM()
+async def test_ai_report_uses_injected_runner_and_renderer() -> None:
+    runner = _RecordingAgentRunner()
     renderer = _RecordingRenderer()
     a = AiReportAction(
         id="a1",
         prompt="security",
         model="claude-sonnet-4-6",
-        llm=llm,
+        runner=runner,
         renderer=renderer,
     )
     result = await a.execute(_ctx())
     assert renderer.calls == ["security"]
-    assert llm.calls == [("rendered::security", "claude-sonnet-4-6")]
+    assert runner.calls[0]["prompt"] == "rendered::security"
+    assert runner.calls[0]["model"] == "claude-sonnet-4-6"
     assert result.output == {"text": "stub-output", "model": "claude-sonnet-4-6"}
+
+
+@pytest.mark.asyncio
+async def test_ai_report_threads_repo_path_and_commit_sha_from_context() -> None:
+    runner = _RecordingAgentRunner()
+    a = AiReportAction(id="a1", prompt="p", model="m", runner=runner)
+    await a.execute(_ctx(commit_sha="deadbeef", repo_path=Path("/tmp/repo")))
+    assert runner.calls[0]["cwd"] == Path("/tmp/repo")
+    assert runner.calls[0]["commit_sha"] == "deadbeef"
+
+
+@pytest.mark.asyncio
+async def test_ai_report_passes_configured_timeout_to_runner() -> None:
+    runner = _RecordingAgentRunner()
+    a = AiReportAction(id="a1", prompt="p", model="m", runner=runner, timeout_s=45.0)
+    await a.execute(_ctx())
+    assert runner.calls[0]["timeout_s"] == 45.0
+
+
+@pytest.mark.asyncio
+async def test_ai_report_falls_back_to_current_dir_when_repo_path_unset() -> None:
+    runner = _RecordingAgentRunner()
+    a = AiReportAction(id="a1", prompt="p", model="m", runner=runner)
+    await a.execute(_ctx())  # repo_path None
+    assert runner.calls[0]["cwd"] == Path(".")
+
+
+@pytest.mark.asyncio
+async def test_ai_report_returns_failure_action_result_on_agent_runner_error() -> None:
+    runner = _RecordingAgentRunner(raise_on_run=AgentRunnerError("backend died"))
+    a = AiReportAction(id="a1", prompt="p", model="m", runner=runner)
+    result = await a.execute(_ctx())
+    assert result.success is False
+    assert result.error is not None and "backend died" in result.error
 
 
 def test_ai_report_agent_defaults_to_none() -> None:
@@ -101,18 +159,16 @@ def test_ai_report_accepts_agent_backend_name() -> None:
 
 @pytest.mark.asyncio
 async def test_ai_report_agent_field_does_not_alter_execute() -> None:
-    llm = _RecordingLLM()
-    renderer = _RecordingRenderer()
+    runner = _RecordingAgentRunner()
     a = AiReportAction(
         id="a1",
         prompt="p",
         model="m",
         agent="claude_code_cli",
-        llm=llm,
-        renderer=renderer,
+        runner=runner,
     )
     result = await a.execute(_ctx())
-    assert llm.calls == [("rendered::p", "m")]
+    assert runner.calls[0]["prompt"] == "p"
     assert result.output == {"text": "stub-output", "model": "m"}
 
 

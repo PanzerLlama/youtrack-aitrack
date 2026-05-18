@@ -54,6 +54,7 @@ class ClaudeCodeCliRunner:
         cwd: Path,
         commit_sha: str | None,
         timeout_s: float,
+        model: str | None = None,
     ) -> AgentResult:
         args: list[str] = [self._binary]
         if self._bare:
@@ -61,11 +62,15 @@ class ClaudeCodeCliRunner:
         args.extend(["-p", prompt])
         if self._allowed_tools is not None:
             args.extend(["--allowedTools", self._allowed_tools])
+        if model is not None:
+            args.extend(["--model", model])
 
         async with self._semaphore:
-            return await self._spawn(args, cwd=cwd, timeout_s=timeout_s)
+            return await self._spawn(args, cwd=cwd, timeout_s=timeout_s, model=model)
 
-    async def _spawn(self, args: list[str], *, cwd: Path, timeout_s: float) -> AgentResult:
+    async def _spawn(
+        self, args: list[str], *, cwd: Path, timeout_s: float, model: str | None
+    ) -> AgentResult:
         started = time.monotonic()
         try:
             proc = await asyncio.create_subprocess_exec(
@@ -103,5 +108,5 @@ class ClaudeCodeCliRunner:
             output=stdout.decode("utf-8", errors="replace"),
             exit_code=proc.returncode,
             duration_s=duration_s,
-            model_used=None,
+            model_used=model,
         )

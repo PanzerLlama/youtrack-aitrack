@@ -5,7 +5,7 @@ from __future__ import annotations
 import os
 from collections.abc import Mapping
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import yaml  # type: ignore[import-untyped]
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
@@ -68,6 +68,7 @@ class DefaultsSection(BaseModel):
     default_agent: str = "anthropic_api"
     agent_timeout_seconds: int = 300
     cli_agent_concurrency: int = 1
+    cli_agent_mode: Literal["bare", "oauth"] = "oauth"
 
     model_config = ConfigDict(frozen=True)
 

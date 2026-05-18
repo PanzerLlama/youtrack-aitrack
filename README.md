@@ -10,23 +10,39 @@
 
 > **Status: beta.** Core daemon path is feature-complete and verified end-to-end against YouTrack Cloud 2026.1. APIs, CLI, and YAML schema may still shift before the first stable release; breaking changes will be called out in the changelog.
 
-A YAML-driven workflow engine that runs AI-agent actions in response to
-YouTrack issue events. Each workflow declares one trigger (e.g. a status
-change) and a sequence of actions; an engine matches incoming events against
-triggers and dispatches matching actions, running independent steps
-concurrently and respecting `depends_on` for ordered work.
+A vendor-agnostic AI agent orchestrator for YouTrack issue events. A YAML
+workflow declares one trigger (e.g. a status change) and a sequence of
+actions; an engine matches incoming events against triggers and dispatches
+matching actions, running independent steps concurrently and respecting
+`depends_on` for ordered work. Each action routes through an `AgentRunner`
+backend — the same Protocol covers shelling out to a local CLI agent
+(Claude Code, future Codex / Gemini / Aider) **and** calling the Anthropic
+SDK directly, so workflows can pick the backend that fits without rewriting
+the engine.
 
 The reference workflow ships with the project: when an issue moves to
 `Ready for testing`, three parallel AI reports run — a security/PCI audit, a
 "Pages Changed" UI summary, and a manual QA plan — and the results are
 written back into the issue's custom fields. Each action is a plugin:
 registered via decorator, invoked by name from YAML, and exposed to the
-engine through small `Protocol` interfaces so its dependencies (LLM client,
-YouTrack REST client, git tooling) can be swapped or stubbed without
-touching the workflow.
+engine through small `Protocol` interfaces so its dependencies (agent
+runner, YouTrack REST client, git tooling) can be swapped or stubbed
+without touching the workflow.
 
 One running daemon binds to one YouTrack project. Multi-project setups use
 multiple instances with separate configs.
+
+## Two backends, one engine
+
+| Backend | When to pick it |
+|---|---|
+| **`claude_code_cli`** (recommended) | Production daemon use. Spawns local `claude -p` per action; the agent inspects the working tree directly via its file-reading tools — no diff is embedded in the prompt. Scales gracefully on large PRs and on frameworks where routing/dependencies are decoupled from file paths (Symfony, Rails, FastAPI). |
+| **`anthropic_api`** | Lower latency single-shot reports; no local CLI install required; preference for SDK-style billing on a separate API key tier. Embeds the full diff in each prompt — request size scales linearly with PR size, and the model only sees what the diff carries. |
+
+Pick per-action via the YAML `agent:` field, or set a workflow-wide default
+in `defaults.default_agent`. The reference workflow leaves `agent:` unset so
+it inherits the instance default; flip the default once and the same YAML
+runs against whichever backend you've configured.
 
 ## How this differs from a YouTrack MCP server
 
@@ -69,6 +85,7 @@ trigger:
 actions:
   - id: security_audit
     type: ai_report
+    # agent: claude_code_cli  # uncomment to route this action via the local CLI agent
     output: { kind: custom_field, name: "Security Audit" }
     prompt: security_audit.md
     model: claude-sonnet-4-6
@@ -102,7 +119,7 @@ sequenceDiagram
     participant D as yta daemon
     participant G as local git
     participant E as engine
-    participant AI as Claude
+    participant A as Agent backend
 
     Dev->>YT: move DEMO-42 to Ready for testing
     D->>YT: poll activity feed
@@ -113,38 +130,47 @@ sequenceDiagram
     D->>E: dispatch matching workflow
 
     par run independent reports
-        E->>AI: security_audit prompt
-        E->>AI: pages_changed prompt
+        E->>A: security_audit (via configured agent)
+        E->>A: pages_changed (via configured agent)
     end
-    AI-->>E: Security Audit report
-    AI-->>E: Pages Changed report
-    E->>AI: qa_plan prompt
-    AI-->>E: QA Plan report
+    A-->>E: Security Audit report
+    A-->>E: Pages Changed report
+    E->>A: qa_plan (via configured agent)
+    A-->>E: QA Plan report
 
     E->>YT: write three reports to custom fields
     E->>YT: set Audit Status to done
     Note over D: cursor advanced, idempotency key recorded
 ```
 
+The `Agent backend` node above is `AnthropicAgentRunner` (single SDK call
+per action) or `ClaudeCodeCliRunner` (spawns `claude -p` per action, with
+filesystem and git tools available to the agent) depending on `agent:` /
+`default_agent`. Engine, runtime, and adapters never change — only the
+backend swaps.
+
 Every step is also a place where you can intervene: `--dry-run` swaps the
 YouTrack writer for a no-op so nothing lands in YT; `--stub-llm` swaps the
-Anthropic call for a placeholder so nothing costs tokens; `include_tags`
+agent call for a placeholder so nothing costs tokens; `include_tags`
 in config filters which issues the daemon reacts to. See
 [docs/operations.md](./docs/operations.md) for the full set of safety knobs
 and the recommended first-run staircase.
 
 ## Quickstart
 
-Requires Python 3.12+ and [uv](https://docs.astral.sh/uv/).
+Requires Python 3.12+ and [uv](https://docs.astral.sh/uv/). The
+`claude_code_cli` backend additionally needs the
+[Claude Code CLI](https://docs.claude.com/en/docs/claude-code) on `PATH`.
 
 ```bash
 # Install
 uv tool install --from git+https://github.com/PanzerLlama/youtrack-aitrack youtrack-aitrack
+yta --version
 
 # Scaffold config
 yta init
 cp ~/.youtrack-aitrack/.env.example ~/.youtrack-aitrack/.env
-# ...edit .env with YouTrack URL, token, project, and Anthropic API key...
+# ...edit .env with YouTrack URL, token, project, and ANTHROPIC_API_KEY...
 
 # Copy the reference workflow + prompts (one-time)
 git clone https://github.com/PanzerLlama/youtrack-aitrack /tmp/yta-source
@@ -154,10 +180,28 @@ cp /tmp/yta-source/prompts/*.md ~/.youtrack-aitrack/prompts/
 # Sanity check
 yta workflows validate
 
-# First dispatch — no API spend, no YouTrack writes
+# First dispatch — no agent spend, no YouTrack writes
 cd /path/to/your/repo                            # daemon needs the git repo
 yta run <issue-id> --dry-run --stub-llm
 ```
+
+To switch the reference workflow to the CLI agent backend, set the instance
+default in `~/.youtrack-aitrack/config.yaml`:
+
+```yaml
+defaults:
+  default_agent: claude_code_cli
+  cli_agent_mode: bare           # daemon-friendly: skips local CLAUDE.md/hooks/plugins
+```
+
+`bare` mode requires `ANTHROPIC_API_KEY` in `.env` (the spawned `claude
+--bare -p` authenticates via that key instead of your local OAuth keychain).
+The `oauth` mode reuses your `claude login` subscription instead; it works
+for interactive testing but is less suitable for unattended daemon use
+because each spawn re-loads the project's `CLAUDE.md`, hooks, plugins, and
+MCP tool definitions as system context. See
+[docs/configuration.md](./docs/configuration.md) for the full set of new
+fields.
 
 The shorter `yta` alias is registered alongside `youtrack-aitrack` and is
 used throughout the docs.
@@ -200,8 +244,11 @@ cli/  →  runtime/  →  engine/  →  domain/  ←  adapters/
 
 Inner rings never import from outer rings. `domain/` is pure pydantic +
 Protocols (no httpx, no anthropic, no subprocess). Adapters wrap external
-systems and implement the Protocols. `runtime/` is the composition root.
-`cli/` is the entry point.
+systems and implement the Protocols. `runtime/` is the composition root,
+which is also where backends register themselves into the agent registry
+(`anthropic_api` → `AnthropicAgentRunner`, `claude_code_cli` →
+`ClaudeCodeCliRunner`, future vendors as additional adapters). `cli/` is
+the entry point.
 
 See [docs/architecture.md](./docs/architecture.md) for the full tour.
 

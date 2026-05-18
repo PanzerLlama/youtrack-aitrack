@@ -8,6 +8,76 @@ file before upgrading.
 
 ## [Unreleased]
 
+### Added
+
+- **Vendor-agnostic agent backend**. `AgentRunner` Protocol in
+  `domain/agent_runner.py` is now the single contract every backend
+  fulfils. `runtime/runner.py:_build_agents` constructs the registry at
+  `wire()` time. Two backends ship:
+  - `claude_code_cli`: `ClaudeCodeCliRunner` spawns `claude -p` /
+    `claude --bare -p` per action with `cwd` set to the resolved repo
+    path; concurrency-gated by an injected `asyncio.Semaphore`;
+    `--model <name>` forwarded when set; bare mode auth via
+    `ANTHROPIC_API_KEY` pushed into the subprocess env.
+  - `anthropic_api`: `AnthropicAgentRunner` wraps the existing
+    `AnthropicLLMClient` and adapts to the new Protocol (cwd /
+    commit_sha accepted and discarded; SDK has no working tree).
+- **Per-action backend selector**. Workflow YAML `ai_report` actions
+  may set `agent: <backend-name>`. Unknown names fail at `wire()` time
+  with the available list. Omitted → falls back to
+  `defaults.default_agent`.
+- **New `defaults` fields**:
+  - `default_agent` (default `anthropic_api`)
+  - `agent_timeout_seconds` (default `300`)
+  - `cli_agent_concurrency` (default `1`)
+  - `cli_agent_mode` (`bare` | `oauth`, default `oauth`)
+- **`Context.commit_sha` and `Context.repo_path`** plumbed through the
+  engine so action implementations (and prompt templates) can reference
+  the commit being audited and the repo root the agent should operate
+  on.
+- **CLI-mode reference prompt**: `prompts/security_audit_cli.md` — a
+  CLI-friendly variant of `security_audit.md` that omits the embedded
+  diff and instructs the agent to inspect the commit via its file-reading
+  and git tools.
+- **`yta --version` / `-V` flag**. Both the flag and the existing
+  `yta version` subcommand now source the package version from
+  `importlib.metadata` so they stay in lockstep with `pyproject.toml`.
+
+### Changed
+
+- **`AiReportAction` switched from `LLMClient` to `AgentRunner`**.
+  The same action class now covers both backends; the engine and
+  `ActionFactory` are unaware of which one is in use.
+- **`ActionFactory` constructor** now takes
+  `agents: dict[str, AgentRunner]` + `default_agent: str` instead of a
+  single `LLMClient`. Per-action backend selection happens here.
+- **`StubLLMClient` → `StubAgentRunner`**. `--stub-llm` continues to
+  work as a CLI flag; the marker string in stub output is now
+  `[STUB AGENT]`.
+- **`AgentRunnerError` stderr now surfaces in `ActionResult.error`**.
+  Failures from the CLI backend used to report only "Claude Code CLI
+  exited with code N" with no diagnostic; the runner's captured
+  stderr (and stdout-on-failure, capped at 8KB) is now appended below
+  a `stderr:` delimiter. The `yta run` table-row formatter shows the
+  first line of the error in the `NOTE` column with a "see run report
+  for full error" hint for multi-line errors.
+
+### Documentation
+
+- README reframed around the two-backend architecture; the CLI backend
+  is positioned as the recommended production path.
+- `docs/installation.md` covers prerequisites for both backends and
+  walks through switching the default backend to `claude_code_cli` in
+  bare mode.
+- `docs/configuration.md` gains an "Agent backends" section and tables
+  for every new `defaults.*` field.
+- `docs/workflows.md` documents the `agent:` field, the new ctx
+  variables (`commit_sha`, `repo_path`), and the difference between
+  SDK-style and CLI-style prompts.
+- `docs/architecture.md` documents the `AgentRunner` Protocol, the
+  registry pattern in `_build_agents`, and the
+  `AnthropicAgentRunner` / `ClaudeCodeCliRunner` adapters.
+
 ## [0.1.0b0] — 2026-05-16
 
 First beta release. The core daemon path is feature-complete and has been

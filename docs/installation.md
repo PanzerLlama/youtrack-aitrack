@@ -7,7 +7,16 @@
 - Git CLI on `PATH` (used by the daemon to resolve branches and diff against
   your base branch).
 - A YouTrack instance you can authenticate against (Cloud or self-hosted).
-- An Anthropic API key.
+- An **agent backend** — at least one of:
+  - **`anthropic_api`**: an Anthropic API key (SDK path, embedded-diff
+    prompts, single request per action).
+  - **`claude_code_cli`** *(recommended for production)*: the
+    [Claude Code CLI](https://docs.claude.com/en/docs/claude-code) on
+    `PATH` plus, for daemon-friendly bare mode, an `ANTHROPIC_API_KEY`
+    that the spawned `claude --bare -p` subprocess uses for auth.
+
+You can configure both backends and pick per workflow / per action; see
+[configuration.md](./configuration.md#agent-backends).
 
 ## Install the CLI
 
@@ -22,7 +31,7 @@ shorter `yta` alias. Verify:
 
 ```bash
 yta --help
-yta version
+yta --version          # or: yta version
 ```
 
 To upgrade later:
@@ -54,8 +63,15 @@ Fill in:
 YOUTRACK_URL=https://your-org.example.com/youtrack
 YOUTRACK_TOKEN=perm:...
 YOUTRACK_PROJECT=ABC
-ANTHROPIC_API_KEY=sk-ant-...
+ANTHROPIC_API_KEY=sk-ant-...     # required for anthropic_api backend
+                                  # and for claude_code_cli in bare mode
 ```
+
+`ANTHROPIC_API_KEY` is consumed in two places: by the `anthropic_api`
+backend for its SDK call, and by the `claude_code_cli` backend when running
+in bare mode (it gets pushed into the spawned subprocess env so
+`claude --bare -p` can authenticate without OAuth). Setting it once covers
+both backends.
 
 ### Getting a YouTrack token
 
@@ -110,11 +126,42 @@ Field names are case-sensitive and must match exactly what's in the workflow
 YAML. Only YouTrack `text` and `string` types are supported in v1 (no enum,
 state, user, build, etc.).
 
+## Pick a default backend
+
+The fresh `config.yaml` from `yta init` sets:
+
+```yaml
+defaults:
+  default_agent: anthropic_api    # SDK path; uses ANTHROPIC_API_KEY directly
+```
+
+For production daemon use, switch to the CLI agent backend in bare mode —
+predictable per-call cost, no local CLAUDE.md/hook/plugin leakage into
+prompts, agent inspects the working tree directly:
+
+```yaml
+defaults:
+  default_agent: claude_code_cli
+  cli_agent_mode: bare            # ANTHROPIC_API_KEY required; skips OAuth keychain
+  cli_agent_concurrency: 1        # serialises CLI spawns; bump cautiously
+  agent_timeout_seconds: 300      # per-action wall-clock cap
+```
+
+`cli_agent_mode: oauth` is the alternative — it reuses your local
+`claude login` subscription. Useful for one-off interactive testing but
+ill-suited to unattended daemons because the spawned `claude -p` re-loads
+your global `~/.claude/CLAUDE.md`, project `CLAUDE.md`, hooks, plugins,
+and MCP tool definitions on every invocation. That overhead silently
+inflates request size and burns API TPM budget before the daemon prompt
+content is even sent.
+
+See [configuration.md](./configuration.md#agent-backends) for every option.
+
 ## First run
 
 `cd` into a git repository where you have a feature branch matching the
 default `branch_pattern: "{task_id}-*"`, then exercise the wiring without
-spending API tokens or touching YouTrack:
+spending agent tokens or touching YouTrack:
 
 ```bash
 cd /path/to/your/repo

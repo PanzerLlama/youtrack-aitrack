@@ -96,12 +96,20 @@ class ClaudeCodeCliRunner:
             raise AgentRunnerError(f"Claude Code CLI exceeded timeout of {timeout_s:.0f}s") from exc
 
         duration_s = time.monotonic() - started
-        stderr_text = stderr.decode("utf-8", errors="replace") if stderr else None
+        stderr_text = stderr.decode("utf-8", errors="replace") if stderr else ""
+        stdout_text = stdout.decode("utf-8", errors="replace") if stdout else ""
 
         if proc.returncode != 0:
+            # Some failure modes (auth nags, JSON-shaped diagnostics) print to
+            # stdout rather than stderr. Combine both so the diagnostic that
+            # bubbles up to ActionResult.error has the full picture.
+            combined = stderr_text
+            if stdout_text:
+                separator = "\n" if combined else ""
+                combined = f"{combined}{separator}stdout: {stdout_text}"
             raise AgentRunnerError(
                 f"Claude Code CLI exited with code {proc.returncode}",
-                stderr=stderr_text,
+                stderr=combined or None,
             )
 
         return AgentResult(

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from pathlib import Path
 from typing import cast
 
 from youtrack_aitrack.domain.action import Action, ActionSpec
@@ -35,6 +36,7 @@ class WorkflowEngine:
         branch: str | None = None,
         diff: str | None = None,
         base_url: str | None = None,
+        repo_path: Path | None = None,
         force: bool = False,
     ) -> list[RunReport]:
         matched = [w for w in workflows if _trigger_matches(w, event)]
@@ -57,6 +59,8 @@ class WorkflowEngine:
                         branch=branch,
                         diff=diff,
                         base_url=base_url,
+                        commit_sha=commit_sha,
+                        repo_path=repo_path,
                     )
                     for w, _ in scheduled
                 )
@@ -95,6 +99,8 @@ class WorkflowEngine:
         branch: str | None = None,
         diff: str | None = None,
         base_url: str | None = None,
+        commit_sha: str | None = None,
+        repo_path: Path | None = None,
     ) -> RunReport:
         outputs: dict[str, ActionResult] = {}
         failed = await _execute_graph(
@@ -105,6 +111,8 @@ class WorkflowEngine:
             branch=branch,
             diff=diff,
             base_url=base_url,
+            commit_sha=commit_sha,
+            repo_path=repo_path,
         )
         output_error: str | None = None
         if not failed and self._output_sink is not None:
@@ -113,7 +121,14 @@ class WorkflowEngine:
                 failed = True
         hook_specs = workflow.on_failure if failed else workflow.on_success
         hook_results = await _execute_hooks(
-            hook_specs, event, outputs, branch=branch, diff=diff, base_url=base_url
+            hook_specs,
+            event,
+            outputs,
+            branch=branch,
+            diff=diff,
+            base_url=base_url,
+            commit_sha=commit_sha,
+            repo_path=repo_path,
         )
         return RunReport(
             workflow_name=workflow.name,
@@ -136,6 +151,8 @@ async def _execute_graph(
     branch: str | None,
     diff: str | None,
     base_url: str | None,
+    commit_sha: str | None,
+    repo_path: Path | None,
 ) -> bool:
     by_id = {a.id: a for a in specs}
     remaining = set(by_id)
@@ -163,6 +180,8 @@ async def _execute_graph(
             branch=branch,
             diff=diff,
             base_url=base_url,
+            commit_sha=commit_sha,
+            repo_path=repo_path,
             action_outputs=dict(outputs),
         )
         results = await asyncio.gather(
@@ -199,6 +218,8 @@ async def _execute_hooks(
     branch: str | None,
     diff: str | None,
     base_url: str | None,
+    commit_sha: str | None,
+    repo_path: Path | None,
 ) -> list[ActionResult]:
     if not specs:
         return []
@@ -207,6 +228,8 @@ async def _execute_hooks(
         branch=branch,
         diff=diff,
         base_url=base_url,
+        commit_sha=commit_sha,
+        repo_path=repo_path,
         action_outputs=dict(outputs),
     )
     results = await asyncio.gather(

@@ -1,6 +1,7 @@
 """Tests for Context."""
 
 from datetime import UTC, datetime
+from pathlib import Path
 
 import pytest
 from pydantic import ValidationError
@@ -22,6 +23,8 @@ def _event() -> IssueEvent:
 def test_context_minimal() -> None:
     c = Context(issue=_event())
     assert c.branch is None
+    assert c.commit_sha is None
+    assert c.repo_path is None
     assert c.action_outputs == {}
 
 
@@ -34,6 +37,16 @@ def test_context_with_outputs() -> None:
     )
     assert c.branch == "DEMO-1-fix-foo"
     assert "a1" in c.action_outputs
+
+
+def test_context_with_commit_sha_and_repo_path() -> None:
+    c = Context(
+        issue=_event(),
+        commit_sha="deadbeef",
+        repo_path=Path("/tmp/repo"),
+    )
+    assert c.commit_sha == "deadbeef"
+    assert c.repo_path == Path("/tmp/repo")
 
 
 def test_context_frozen() -> None:

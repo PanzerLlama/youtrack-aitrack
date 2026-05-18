@@ -83,6 +83,7 @@ class Runner:
             branch=branch,
             diff=diff,
             base_url=self._config.defaults.base_url,
+            repo_path=self._repo_dir,
             force=force,
         )
         for report in reports:

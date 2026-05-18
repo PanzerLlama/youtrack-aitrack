@@ -470,6 +470,54 @@ async def test_branch_and_diff_propagate_to_hooks() -> None:
     assert hook_ctx.diff == "diff --git a/x b/x\n"
 
 
+async def test_dispatch_threads_commit_sha_and_repo_path_into_context() -> None:
+    from pathlib import Path
+
+    a = _FakeAction(id="a")
+    wf = _wf(actions=[a])
+
+    await WorkflowEngine().dispatch(
+        _manual_event(),
+        [wf],
+        commit_sha="deadbeef",
+        repo_path=Path("/tmp/repo"),
+    )
+
+    ctx = cast(_FakeAction, a).calls[0]
+    assert ctx.commit_sha == "deadbeef"
+    assert ctx.repo_path == Path("/tmp/repo")
+
+
+async def test_commit_sha_and_repo_path_default_to_none() -> None:
+    a = _FakeAction(id="a")
+    wf = _wf(actions=[a])
+
+    await WorkflowEngine().dispatch(_manual_event(), [wf])
+
+    ctx = cast(_FakeAction, a).calls[0]
+    assert ctx.commit_sha is None
+    assert ctx.repo_path is None
+
+
+async def test_commit_sha_and_repo_path_propagate_to_hooks() -> None:
+    from pathlib import Path
+
+    a = _FakeAction(id="a")
+    hook = _FakeAction(id="celebrate")
+    wf = _wf(actions=[a], on_success=[hook])
+
+    await WorkflowEngine().dispatch(
+        _manual_event(),
+        [wf],
+        commit_sha="deadbeef",
+        repo_path=Path("/tmp/repo"),
+    )
+
+    hook_ctx = cast(_FakeAction, hook).calls[0]
+    assert hook_ctx.commit_sha == "deadbeef"
+    assert hook_ctx.repo_path == Path("/tmp/repo")
+
+
 # --- OutputSink phase ---
 
 

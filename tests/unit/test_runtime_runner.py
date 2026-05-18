@@ -75,7 +75,10 @@ class _FakeLLM:
 
 class _FakeRenderer:
     def render(self, template: str, ctx: Context) -> str:
-        return f"branch={ctx.branch}|diff={ctx.diff}|base_url={ctx.base_url}|tmpl={template}"
+        return (
+            f"branch={ctx.branch}|diff={ctx.diff}|base_url={ctx.base_url}|"
+            f"commit_sha={ctx.commit_sha}|repo_path={ctx.repo_path}|tmpl={template}"
+        )
 
 
 class _FakeWriter:
@@ -355,6 +358,40 @@ async def test_dispatch_base_url_none_when_config_unset() -> None:
 
     rendered_prompt, _model = llm.calls[0]
     assert "base_url=None" in rendered_prompt
+
+
+async def test_dispatch_threads_commit_sha_and_repo_path_into_context() -> None:
+    git = _FakeGit(sha="cafef00d")
+    wf = Workflow(
+        name="audit",
+        trigger=ManualTrigger(),
+        actions=[AiReportAction(id="a", inputs=["git_diff"], prompt="p.md", model="m")],
+    )
+    runner, llm, _, _, _ = _build(git=git, workflow=wf)
+
+    await runner.dispatch(_manual_event())
+
+    rendered_prompt, _model = llm.calls[0]
+    assert "commit_sha=cafef00d" in rendered_prompt
+    assert "repo_path=/tmp/fakerepo" in rendered_prompt
+
+
+async def test_dispatch_repo_path_present_even_when_git_diff_unavailable() -> None:
+    git = _FakeGit(branch=None)
+    wf = Workflow(
+        name="audit",
+        trigger=ManualTrigger(),
+        actions=[
+            AiReportAction(id="a", inputs=[], prompt="p.md", model="m"),
+        ],
+    )
+    runner, llm, _, _, _ = _build(git=git, workflow=wf)
+
+    await runner.dispatch(_manual_event())
+
+    rendered_prompt, _model = llm.calls[0]
+    assert "repo_path=/tmp/fakerepo" in rendered_prompt
+    assert "commit_sha=None" in rendered_prompt
 
 
 async def test_run_force_bypasses_idempotency() -> None:

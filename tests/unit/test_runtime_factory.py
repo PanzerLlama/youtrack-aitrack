@@ -2,11 +2,15 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import cast
+
+import pytest
 
 from youtrack_aitrack.domain.actions.ai_report import AiReportAction
 from youtrack_aitrack.domain.actions.set_field import SetFieldAction
 from youtrack_aitrack.domain.actions.yt_comment import YtCommentAction
+from youtrack_aitrack.domain.agent_runner import AgentResult, AgentRunner
 from youtrack_aitrack.domain.context import Context
 from youtrack_aitrack.domain.output import CommentOutput, CustomFieldOutput
 from youtrack_aitrack.domain.triggers.manual import ManualTrigger
@@ -14,13 +18,29 @@ from youtrack_aitrack.domain.workflow import Workflow
 from youtrack_aitrack.runtime.factory import (
     ActionFactory,
     StandardOutputSink,
-    StubLLMClient,
+    StubAgentRunner,
 )
 
 
-class _FakeLLM:
-    async def complete(self, prompt: str, model: str) -> str:
-        return f"llm[{model}]:{prompt}"
+class _FakeAgentRunner:
+    def __init__(self, label: str = "fake") -> None:
+        self.label = label
+
+    async def run(
+        self,
+        prompt: str,
+        *,
+        cwd: Path,
+        commit_sha: str | None,
+        timeout_s: float,
+        model: str | None = None,
+    ) -> AgentResult:
+        return AgentResult(
+            output=f"{self.label}[{model}]:{prompt}",
+            exit_code=0,
+            duration_s=0.0,
+            model_used=model,
+        )
 
 
 class _FakeRenderer:
@@ -48,23 +68,67 @@ def _factory(
     *,
     writer: _FakeWriter | None = None,
     poster: _FakePoster | None = None,
+    agents: dict[str, AgentRunner] | None = None,
+    default_agent: str = "anthropic_api",
+    agent_timeout_seconds: float = 300.0,
 ) -> ActionFactory:
     return ActionFactory(
-        llm=_FakeLLM(),
+        agents=agents or {"anthropic_api": _FakeAgentRunner("anthropic")},
+        default_agent=default_agent,
         renderer=_FakeRenderer(),
         writer=writer or _FakeWriter(),
         poster=poster or _FakePoster(),
+        agent_timeout_seconds=agent_timeout_seconds,
     )
 
 
-def test_materialize_ai_report_injects_llm_and_renderer() -> None:
+def test_materialize_ai_report_injects_runner_and_renderer() -> None:
     spec = AiReportAction(id="a", prompt="security_audit.md", model="claude-sonnet-4-6")
-    materialized = _factory().materialize(spec)
+    runner = _FakeAgentRunner("anthropic")
+    materialized = _factory(agents={"anthropic_api": runner}).materialize(spec)
     assert isinstance(materialized, AiReportAction)
     assert materialized.prompt == "security_audit.md"
     assert materialized.model == "claude-sonnet-4-6"
-    assert isinstance(cast(AiReportAction, materialized)._llm, _FakeLLM)
+    assert cast(AiReportAction, materialized)._runner is runner
     assert isinstance(cast(AiReportAction, materialized)._renderer, _FakeRenderer)
+
+
+def test_materialize_ai_report_routes_to_named_agent_when_set() -> None:
+    spec = AiReportAction(id="a", prompt="p.md", model="m", agent="claude_code_cli")
+    cli_runner = _FakeAgentRunner("cli")
+    sdk_runner = _FakeAgentRunner("sdk")
+    materialized = _factory(
+        agents={"anthropic_api": sdk_runner, "claude_code_cli": cli_runner}
+    ).materialize(spec)
+    assert cast(AiReportAction, materialized)._runner is cli_runner
+
+
+def test_materialize_ai_report_uses_default_agent_when_unset() -> None:
+    spec = AiReportAction(id="a", prompt="p.md", model="m")  # agent None
+    cli_runner = _FakeAgentRunner("cli")
+    sdk_runner = _FakeAgentRunner("sdk")
+    materialized = _factory(
+        agents={"anthropic_api": sdk_runner, "claude_code_cli": cli_runner},
+        default_agent="anthropic_api",
+    ).materialize(spec)
+    assert cast(AiReportAction, materialized)._runner is sdk_runner
+
+
+def test_materialize_ai_report_raises_for_unknown_agent() -> None:
+    spec = AiReportAction(id="a", prompt="p.md", model="m", agent="nonexistent_cli")
+    with pytest.raises(ValueError, match="nonexistent_cli"):
+        _factory().materialize(spec)
+
+
+def test_factory_rejects_default_agent_not_in_registry() -> None:
+    with pytest.raises(ValueError, match="default_agent 'codex_cli'"):
+        ActionFactory(
+            agents={"anthropic_api": _FakeAgentRunner()},
+            default_agent="codex_cli",
+            renderer=_FakeRenderer(),
+            writer=_FakeWriter(),
+            poster=_FakePoster(),
+        )
 
 
 def test_materialize_set_field_injects_writer() -> None:
@@ -88,6 +152,7 @@ def test_materialize_yt_comment_injects_poster() -> None:
 def test_materialize_workflow_rewires_all_action_groups() -> None:
     writer = _FakeWriter()
     poster = _FakePoster()
+    runner = _FakeAgentRunner("anthropic")
     wf = Workflow(
         name="wf",
         trigger=ManualTrigger(),
@@ -99,13 +164,15 @@ def test_materialize_workflow_rewires_all_action_groups() -> None:
         on_failure=[SetFieldAction(id="bad", fields={"Status": "failed"})],
     )
 
-    rewired = _factory(writer=writer, poster=poster).materialize_workflow(wf)
+    rewired = _factory(
+        writer=writer, poster=poster, agents={"anthropic_api": runner}
+    ).materialize_workflow(wf)
 
     ai = cast(AiReportAction, rewired.actions[0])
     sf = cast(SetFieldAction, rewired.actions[1])
     ok = cast(YtCommentAction, rewired.on_success[0])
     bad = cast(SetFieldAction, rewired.on_failure[0])
-    assert isinstance(ai._llm, _FakeLLM)
+    assert ai._runner is runner
     assert sf._writer is writer
     assert ok._poster is poster
     assert bad._writer is writer
@@ -113,21 +180,31 @@ def test_materialize_workflow_rewires_all_action_groups() -> None:
     assert [a.id for a in rewired.actions] == ["a", "s"]
 
 
-async def test_stub_llm_returns_marked_placeholder_with_model_and_prompt_length() -> None:
-    stub = StubLLMClient()
-    result = await stub.complete("hello world", "claude-sonnet-4-6")
+async def test_stub_agent_returns_marked_placeholder_with_request_fields() -> None:
+    stub = StubAgentRunner()
+    result = await stub.run(
+        "hello world",
+        cwd=Path("/tmp/x"),
+        commit_sha="abc123",
+        timeout_s=30.0,
+        model="claude-sonnet-4-6",
+    )
 
-    assert "[STUB LLM]" in result
-    assert "claude-sonnet-4-6" in result
-    assert "Prompt length: 11" in result
-    assert "--stub-llm" in result  # tells user how to disable
+    assert "[STUB AGENT]" in result.output
+    assert "claude-sonnet-4-6" in result.output
+    assert "Prompt length: 11" in result.output
+    assert "abc123" in result.output
+    assert "/tmp/x" in result.output
+    assert "--stub-llm" in result.output  # tells user how to disable
+    assert result.exit_code == 0
+    assert result.model_used == "claude-sonnet-4-6"
 
 
-async def test_stub_llm_is_deterministic() -> None:
-    stub = StubLLMClient()
-    a = await stub.complete("x", "m")
-    b = await stub.complete("x", "m")
-    assert a == b
+async def test_stub_agent_is_deterministic() -> None:
+    stub = StubAgentRunner()
+    a = await stub.run("x", cwd=Path("/"), commit_sha=None, timeout_s=1.0, model="m")
+    b = await stub.run("x", cwd=Path("/"), commit_sha=None, timeout_s=1.0, model="m")
+    assert a.output == b.output
 
 
 async def test_standard_output_sink_custom_field_writes_via_field_writer() -> None:

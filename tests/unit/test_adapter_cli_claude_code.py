@@ -171,3 +171,27 @@ async def test_cwd_is_honored(fake_success: Path, tmp_path: Path) -> None:
     runner = ClaudeCodeCliRunner(asyncio.Semaphore(1), binary=str(fake_success))
     result = await runner.run("p", cwd=subdir, commit_sha=None, timeout_s=5.0)
     assert result.exit_code == 0
+
+
+async def test_model_kwarg_appends_model_flag(fake_echo_args: Path, tmp_path: Path) -> None:
+    runner = ClaudeCodeCliRunner(asyncio.Semaphore(1), binary=str(fake_echo_args))
+    result = await runner.run(
+        "p", cwd=tmp_path, commit_sha=None, timeout_s=5.0, model="claude-sonnet-4-6"
+    )
+    lines = result.output.strip().splitlines()
+    assert "--model" in lines
+    assert "claude-sonnet-4-6" in lines
+
+
+async def test_model_kwarg_omitted_when_none(fake_echo_args: Path, tmp_path: Path) -> None:
+    runner = ClaudeCodeCliRunner(asyncio.Semaphore(1), binary=str(fake_echo_args))
+    result = await runner.run("p", cwd=tmp_path, commit_sha=None, timeout_s=5.0)
+    assert "--model" not in result.output.splitlines()
+
+
+async def test_model_used_echoes_requested_model(fake_success: Path, tmp_path: Path) -> None:
+    runner = ClaudeCodeCliRunner(asyncio.Semaphore(1), binary=str(fake_success))
+    result = await runner.run(
+        "p", cwd=tmp_path, commit_sha=None, timeout_s=5.0, model="claude-opus-4-7"
+    )
+    assert result.model_used == "claude-opus-4-7"

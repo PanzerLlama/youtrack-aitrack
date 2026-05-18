@@ -1,7 +1,8 @@
-"""Tests for AnthropicLLMClient adapter (no real API calls)."""
+"""Tests for AnthropicLLMClient adapter + AnthropicAgentRunner shim (no real API calls)."""
 
 from __future__ import annotations
 
+from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
@@ -9,12 +10,15 @@ import pytest
 from anthropic import AsyncAnthropic
 from anthropic.types import TextBlock
 
-from youtrack_aitrack.adapters.llm.anthropic import AnthropicLLMClient
-from youtrack_aitrack.domain.actions.ai_report import LLMClient
+from youtrack_aitrack.adapters.llm.anthropic import (
+    AnthropicAgentRunner,
+    AnthropicLLMClient,
+)
+from youtrack_aitrack.domain.agent_runner import AgentRunner
 
 
-def _accepts_llm(client: LLMClient) -> LLMClient:
-    return client
+def _accepts_agent_runner(runner: AgentRunner) -> AgentRunner:
+    return runner
 
 
 def _text_block(text: str) -> TextBlock:
@@ -28,10 +32,11 @@ def _make_adapter(create_fn: Any) -> AnthropicLLMClient:
     return AnthropicLLMClient("test", client=real)
 
 
-def test_adapter_satisfies_llm_client_protocol() -> None:
+def test_agent_runner_shim_satisfies_protocol() -> None:
     adapter = _make_adapter(None)
-    accepted = _accepts_llm(adapter)
-    assert accepted is adapter
+    shim = AnthropicAgentRunner(adapter, default_model="claude-sonnet-4-6")
+    accepted = _accepts_agent_runner(shim)
+    assert accepted is shim
 
 
 async def test_complete_returns_concatenated_text() -> None:
@@ -128,3 +133,48 @@ def test_custom_max_tokens_is_used() -> None:
 
     asyncio.run(adapter.complete("p", "m"))
     assert captured["max_tokens"] == 512
+
+
+# --- AnthropicAgentRunner shim ---
+
+
+async def test_agent_runner_returns_agent_result_with_sdk_output() -> None:
+    async def fake_create(**_: Any) -> SimpleNamespace:
+        return SimpleNamespace(content=[_text_block("audit ok")])
+
+    shim = AnthropicAgentRunner(_make_adapter(fake_create), default_model="claude-sonnet-4-6")
+    result = await shim.run(
+        "render me", cwd=Path("/tmp"), commit_sha="abc", timeout_s=5.0, model="claude-opus-4-7"
+    )
+    assert result.output == "audit ok"
+    assert result.exit_code == 0
+    assert result.model_used == "claude-opus-4-7"
+    assert result.duration_s >= 0.0
+
+
+async def test_agent_runner_falls_back_to_default_model_when_none_passed() -> None:
+    captured: dict[str, Any] = {}
+
+    async def fake_create(**kwargs: Any) -> SimpleNamespace:
+        captured.update(kwargs)
+        return SimpleNamespace(content=[_text_block("ok")])
+
+    shim = AnthropicAgentRunner(_make_adapter(fake_create), default_model="claude-sonnet-4-6")
+    result = await shim.run("p", cwd=Path("/tmp"), commit_sha=None, timeout_s=5.0)
+    assert captured["model"] == "claude-sonnet-4-6"
+    assert result.model_used == "claude-sonnet-4-6"
+
+
+async def test_agent_runner_discards_cwd_and_commit_sha() -> None:
+    captured: dict[str, Any] = {}
+
+    async def fake_create(**kwargs: Any) -> SimpleNamespace:
+        captured.update(kwargs)
+        return SimpleNamespace(content=[_text_block("ok")])
+
+    shim = AnthropicAgentRunner(_make_adapter(fake_create), default_model="m")
+    # Pass distinct cwd + commit_sha and assert nothing about them reaches the SDK call.
+    await shim.run("p", cwd=Path("/nonexistent"), commit_sha="dead", timeout_s=5.0, model="m")
+    user_msg = captured["messages"][0]["content"]
+    assert "/nonexistent" not in user_msg
+    assert "dead" not in user_msg

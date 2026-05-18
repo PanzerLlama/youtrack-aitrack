@@ -65,6 +65,9 @@ class DefaultsSection(BaseModel):
     base_url: str | None = None
     git_base_branch: str = "main"
     include_tags: list[str] = Field(default_factory=list)
+    default_agent: str = "anthropic_api"
+    agent_timeout_seconds: int = 300
+    cli_agent_concurrency: int = 1
 
     model_config = ConfigDict(frozen=True)
 

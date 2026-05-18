@@ -1,9 +1,14 @@
-"""AnthropicLLMClient — wraps the anthropic SDK as an LLMClient adapter."""
+"""Anthropic SDK adapter — both the low-level LLM client and an AgentRunner shim."""
 
 from __future__ import annotations
 
+import time
+from pathlib import Path
+
 from anthropic import AsyncAnthropic
 from anthropic.types import TextBlock
+
+from youtrack_aitrack.domain.agent_runner import AgentResult
 
 # Fixed system prompt sent alongside every rendered template. Frames the model's
 # role so that text inside the user message (which contains the git diff and
@@ -57,3 +62,38 @@ class AnthropicLLMClient:
             if isinstance(block, TextBlock):
                 parts.append(block.text)
         return "".join(parts)
+
+
+class AnthropicAgentRunner:
+    """Adapt :class:`AnthropicLLMClient` to the :class:`AgentRunner` Protocol.
+
+    The Anthropic SDK has no concept of a working tree, so ``cwd`` and
+    ``commit_sha`` are accepted and discarded — the prompt itself must
+    embed any diff or metadata the model needs. ``timeout_s`` is also
+    ignored: the SDK's own timeout (set at :class:`AnthropicLLMClient`
+    construction) governs the call. ``duration_s`` on the result is
+    measured around the SDK call so callers see honest wall-clock metrics.
+    """
+
+    def __init__(self, llm: AnthropicLLMClient, *, default_model: str) -> None:
+        self._llm = llm
+        self._default_model = default_model
+
+    async def run(
+        self,
+        prompt: str,
+        *,
+        cwd: Path,
+        commit_sha: str | None,
+        timeout_s: float,
+        model: str | None = None,
+    ) -> AgentResult:
+        chosen_model = model or self._default_model
+        started = time.monotonic()
+        text = await self._llm.complete(prompt, chosen_model)
+        return AgentResult(
+            output=text,
+            exit_code=0,
+            duration_s=time.monotonic() - started,
+            model_used=chosen_model,
+        )

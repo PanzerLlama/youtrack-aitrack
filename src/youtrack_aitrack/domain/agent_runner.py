@@ -1,17 +1,19 @@
 """AgentRunner — abstract interface for AI agent backends.
 
-An AgentRunner runs a rendered prompt against an AI agent that has access to
-the project's working tree. Implementations may shell out to a local CLI
-(claude, codex, gemini) or call a remote SDK; the engine treats them
-identically through this Protocol.
+An AgentRunner runs a rendered prompt against an AI agent that may have
+access to the project's working tree. Implementations may shell out to a
+local CLI (claude, codex, gemini) or call a remote SDK; the engine treats
+them identically through this Protocol.
 
-Distinct from LLMClient (in `actions.ai_report`) on purpose: LLMClient
-expects a self-contained prompt and returns a string. AgentRunner expects a
-prompt plus a working directory and a commit SHA — the agent is presumed to
-have file-system tools and is asked to inspect the working tree itself
-rather than receive a pre-embedded diff. This is why the signature is
-richer and why the result carries subprocess-style metadata (exit code,
-duration, model used).
+The signature carries cwd + commit_sha so that working-tree-aware backends
+(CLI runners) can inspect the project directly rather than receive a
+pre-embedded diff. SDK-style backends (Anthropic API) accept these args
+and discard them. ``model`` lets the caller pass the per-action model
+choice through to backends that select model per-call (SDK) while CLI
+runners may map it to a ``--model`` flag.
+
+AgentResult carries subprocess-style metadata (exit code, duration, model
+used) so the engine has uniform observability across backends.
 """
 
 from __future__ import annotations
@@ -56,4 +58,5 @@ class AgentRunner(Protocol):
         cwd: Path,
         commit_sha: str | None,
         timeout_s: float,
+        model: str | None = None,
     ) -> AgentResult: ...

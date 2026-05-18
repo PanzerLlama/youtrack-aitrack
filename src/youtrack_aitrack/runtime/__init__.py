@@ -5,7 +5,7 @@ from youtrack_aitrack.runtime.factory import (
     NoOpCommentPoster,
     NoOpFieldWriter,
     StandardOutputSink,
-    StubLLMClient,
+    StubAgentRunner,
 )
 from youtrack_aitrack.runtime.poller import (
     IssueTagsLookup,
@@ -31,7 +31,7 @@ __all__ = [
     "Poller",
     "Runner",
     "StandardOutputSink",
-    "StubLLMClient",
+    "StubAgentRunner",
     "build_poller",
     "build_runner",
 ]

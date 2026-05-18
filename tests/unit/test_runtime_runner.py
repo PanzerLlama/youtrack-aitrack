@@ -18,6 +18,7 @@ from youtrack_aitrack.config.instance import (
 )
 from youtrack_aitrack.domain.actions.ai_report import AiReportAction
 from youtrack_aitrack.domain.actions.set_field import SetFieldAction
+from youtrack_aitrack.domain.agent_runner import AgentResult
 from youtrack_aitrack.domain.context import Context
 from youtrack_aitrack.domain.event import IssueEvent
 from youtrack_aitrack.domain.run import RunReport, RunState
@@ -65,12 +66,22 @@ class _FakeGit:
 
 
 class _FakeLLM:
+    """AgentRunner test double. Kept the historical _FakeLLM name to minimise churn."""
+
     def __init__(self) -> None:
         self.calls: list[tuple[str, str]] = []
 
-    async def complete(self, prompt: str, model: str) -> str:
-        self.calls.append((prompt, model))
-        return "ai-output"
+    async def run(
+        self,
+        prompt: str,
+        *,
+        cwd: Path,
+        commit_sha: str | None,
+        timeout_s: float,
+        model: str | None = None,
+    ) -> AgentResult:
+        self.calls.append((prompt, model or ""))
+        return AgentResult(output="ai-output", exit_code=0, duration_s=0.0, model_used=model)
 
 
 class _FakeRenderer:
@@ -163,7 +174,13 @@ def _build(
     writer = writer or _FakeWriter()
     run_store = run_store or _FakeRunStore()
     state_lookup = state_lookup or _FakeStateLookup()
-    factory = ActionFactory(llm=llm, renderer=_FakeRenderer(), writer=writer, poster=_FakePoster())
+    factory = ActionFactory(
+        agents={"anthropic_api": llm},
+        default_agent="anthropic_api",
+        renderer=_FakeRenderer(),
+        writer=writer,
+        poster=_FakePoster(),
+    )
     workflows = [factory.materialize_workflow(workflow)]
     runner = Runner(
         config=_config(base_url=base_url, git_base_branch=git_base_branch),

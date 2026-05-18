@@ -233,7 +233,7 @@ def test_run_stub_llm_skips_anthropic_and_writes_placeholder(
     # Output sink writes the ai_report text to the declared custom field.
     assert write_route.called
     body = write_route.calls.last.request.read().decode()
-    assert "[STUB LLM]" in body
+    assert "[STUB AGENT]" in body
     assert "claude-sonnet-4-6" in body
     # YouTrack field-write payload uses the resolved field id (PF-1), not the name.
     assert '"id":"PF-1"' in body

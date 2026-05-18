@@ -14,6 +14,7 @@ from youtrack_aitrack.config.instance import (
     YouTrackSection,
 )
 from youtrack_aitrack.domain.actions.set_field import SetFieldAction
+from youtrack_aitrack.domain.agent_runner import AgentResult
 from youtrack_aitrack.domain.event import IssueEvent
 from youtrack_aitrack.domain.run import RunReport
 from youtrack_aitrack.domain.triggers.status_change import StatusChangeTrigger
@@ -66,8 +67,16 @@ class _FakePoster:
 
 
 class _FakeLLM:
-    async def complete(self, prompt: str, model: str) -> str:
-        return ""
+    async def run(
+        self,
+        prompt: str,
+        *,
+        cwd: Path,
+        commit_sha: str | None,
+        timeout_s: float,
+        model: str | None = None,
+    ) -> AgentResult:
+        return AgentResult(output="", exit_code=0, duration_s=0.0, model_used=model)
 
 
 class _FakeRenderer:
@@ -149,7 +158,11 @@ def _build_poller(
         actions=[SetFieldAction(id="mark", fields={"Status": "audited"})],
     )
     factory = ActionFactory(
-        llm=_FakeLLM(), renderer=_FakeRenderer(), writer=writer, poster=_FakePoster()
+        agents={"anthropic_api": _FakeLLM()},
+        default_agent="anthropic_api",
+        renderer=_FakeRenderer(),
+        writer=writer,
+        poster=_FakePoster(),
     )
     workflows = [factory.materialize_workflow(wf)]
     runner = Runner(

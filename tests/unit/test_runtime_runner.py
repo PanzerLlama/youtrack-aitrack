@@ -489,3 +489,56 @@ def test_resolve_repo_state_empty_branch_marks_unavailable(branch: str | None) -
     )
     assert b is None and d is None and sha is None
     assert unavailable == {"git_diff"}
+
+
+# --- _build_cli_runner — cli_agent_mode wiring ---
+
+
+def _wire_config(*, cli_agent_mode: str = "oauth", api_key: str = "test-key") -> InstanceConfig:
+    return InstanceConfig(
+        youtrack=YouTrackSection(url="https://yt.example.com", token="t", project="DEMO"),
+        anthropic=AnthropicSection(api_key=api_key),
+        paths=PathsSection(),
+        defaults=DefaultsSection(
+            branch_pattern="{task_id}-*",
+            cli_agent_mode=cli_agent_mode,  # type: ignore[arg-type]
+        ),
+    )
+
+
+def test_build_cli_runner_oauth_mode_default() -> None:
+    from youtrack_aitrack.runtime.runner import _build_cli_runner
+
+    runner = _build_cli_runner(_wire_config())
+    # _bare is the private flag carrying the constructor arg; if it ever stops
+    # being a single attribute we'll need a public accessor, but for now this
+    # is the cheapest way to assert intent.
+    assert runner._bare is False
+    assert runner._env is None
+
+
+def test_build_cli_runner_bare_mode_passes_api_key_into_env() -> None:
+    from youtrack_aitrack.runtime.runner import _build_cli_runner
+
+    runner = _build_cli_runner(_wire_config(cli_agent_mode="bare", api_key="sk-abc"))
+    assert runner._bare is True
+    assert runner._env is not None
+    assert runner._env.get("ANTHROPIC_API_KEY") == "sk-abc"
+
+
+def test_build_cli_runner_bare_mode_inherits_other_env_vars() -> None:
+    from youtrack_aitrack.runtime.runner import _build_cli_runner
+
+    runner = _build_cli_runner(_wire_config(cli_agent_mode="bare", api_key="sk-abc"))
+    # bare env should contain ANTHROPIC_API_KEY plus inherited parent env;
+    # PATH is the most reliable inherited var to assert without coupling to
+    # the runner's call site.
+    assert runner._env is not None
+    assert "PATH" in runner._env
+
+
+def test_build_cli_runner_bare_mode_requires_api_key() -> None:
+    from youtrack_aitrack.runtime.runner import _build_cli_runner
+
+    with pytest.raises(ValueError, match="cli_agent_mode='bare'"):
+        _build_cli_runner(_wire_config(cli_agent_mode="bare", api_key=""))

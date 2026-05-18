@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import os
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -227,6 +228,15 @@ def _build_agents(config: InstanceConfig, *, stub_llm: bool) -> dict[str, AgentR
     matter which ``agent`` they declare. Otherwise both real backends are
     registered eagerly; the CLI runner's subprocess is only spawned on actual
     invocation, so registering it costs nothing if no workflow uses it.
+
+    When ``cli_agent_mode='bare'`` the CLI runner is constructed with
+    ``bare=True`` and ANTHROPIC_API_KEY pushed into its subprocess env, so
+    spawned ``claude --bare -p`` calls skip local CLAUDE.md / hooks / plugins
+    and authenticate via the API key instead of the user's OAuth keychain.
+    This is the daemon-friendly mode: deterministic small input, predictable
+    per-call token cost, no leakage of developer-local context. Bare mode
+    requires a non-empty api_key — wire() fails loudly here rather than
+    waiting for the first spawn to crash.
     """
     if stub_llm:
         stub = StubAgentRunner()
@@ -235,5 +245,20 @@ def _build_agents(config: InstanceConfig, *, stub_llm: bool) -> dict[str, AgentR
         AnthropicLLMClient(config.anthropic.api_key),
         default_model=config.anthropic.default_model,
     )
-    cli_runner = ClaudeCodeCliRunner(asyncio.Semaphore(config.defaults.cli_agent_concurrency))
+    cli_runner = _build_cli_runner(config)
     return {"anthropic_api": anthropic_runner, "claude_code_cli": cli_runner}
+
+
+def _build_cli_runner(config: InstanceConfig) -> ClaudeCodeCliRunner:
+    semaphore = asyncio.Semaphore(config.defaults.cli_agent_concurrency)
+    if config.defaults.cli_agent_mode == "bare":
+        if not config.anthropic.api_key:
+            raise ValueError(
+                "cli_agent_mode='bare' requires anthropic.api_key to be set "
+                "(bare mode authenticates the spawned `claude` subprocess via "
+                "ANTHROPIC_API_KEY, not OAuth). Either set the api_key or "
+                "switch cli_agent_mode to 'oauth'."
+            )
+        env = {**os.environ, "ANTHROPIC_API_KEY": config.anthropic.api_key}
+        return ClaudeCodeCliRunner(semaphore, bare=True, env=env)
+    return ClaudeCodeCliRunner(semaphore)

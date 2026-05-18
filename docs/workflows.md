@@ -116,12 +116,14 @@ context-building lives in `Runner`, not in the action.
 
 #### `ai_report`
 
-Renders a Jinja prompt template, sends it to Anthropic, returns the text.
+Renders a Jinja prompt template, sends it to the configured `AgentRunner`
+backend, returns the text.
 
 ```yaml
 - id: security_audit
   type: ai_report
   inputs: [git_diff]
+  agent: claude_code_cli              # optional: per-action backend override
   output: { kind: custom_field, name: "Security Audit" }
   prompt: security_audit.md           # relative to prompts_dir
   model: claude-sonnet-4-6
@@ -130,8 +132,18 @@ Renders a Jinja prompt template, sends it to Anthropic, returns the text.
 | Field | Type | Notes |
 |---|---|---|
 | `prompt` | string | Path to a Jinja template, relative to `paths.prompts_dir`. |
-| `model` | string | Anthropic model id. Per-action override of `anthropic.default_model`. |
-| `output` | OutputSpec | Where to write the LLM result. See below. |
+| `model` | string | Model id. Passed verbatim to the backend — accepts whatever the chosen backend accepts (`claude-sonnet-4-6`, `claude-opus-4-7`, the `sonnet`/`opus`/`haiku` aliases for the CLI backend, etc.). |
+| `agent` | string \| null | Backend name (`anthropic_api`, `claude_code_cli`, future `codex_cli` / `gemini_cli`). Omit to inherit `defaults.default_agent`. Unknown names fail at runtime composition. |
+| `output` | OutputSpec | Where to write the agent's result. See below. |
+
+The two shipping backends are documented under
+[configuration.md > Agent backends](./configuration.md#agent-backends).
+Picking the right one matters for prompt design: the SDK backend embeds the
+git diff inline in your template, so prompts should reference
+`{{ ctx.diff }}`; the CLI backend gives the agent file-reading tools and
+no inline diff, so prompts should reference `{{ ctx.commit_sha }}` and
+`{{ ctx.repo_path }}` and instruct the agent to inspect the commit
+directly (see `prompts/security_audit_cli.md` for the reference shape).
 
 #### `set_field`
 
@@ -252,13 +264,43 @@ Available variables:
 |---|---|---|
 | `ctx.issue` | IssueEvent | `issue_id`, `project`, `event_kind`, `from_state`, `to_state`, `field_name`, `from_value`, `to_value`, `actor`, `timestamp`, `raw` |
 | `ctx.branch` | str \| None | Branch resolved by `git branch --list <pattern>`. `None` if no branch matched. |
-| `ctx.diff` | str \| None | `git diff --merge-base <base> <branch>`. `None` if branch unresolved or diff failed. |
+| `ctx.diff` | str \| None | `git diff --merge-base <base> <branch>`. `None` if branch unresolved or diff failed. Always present in context, but CLI-backend prompts typically ignore it (the agent reads the diff via its own tools). |
+| `ctx.commit_sha` | str \| None | Tip commit of the resolved branch. CLI-backend prompts reference this when telling the agent which commit to inspect. |
+| `ctx.repo_path` | Path \| None | Absolute path to the git repo root (from `--repo-dir` or cwd). CLI backends receive this as the spawned subprocess `cwd`; prompts mostly read it for paths-in-instructions. |
 | `ctx.base_url` | str \| None | From `defaults.base_url`. Use to construct clickable URLs in reports. |
 | `ctx.action_outputs` | dict[str, ActionResult] | Results of upstream actions (for `depends_on`). |
 
 Jinja uses `StrictUndefined` — typos like `ctx.branche` will raise at render
 time rather than silently producing empty strings. Always wrap optional
 variables in `{% if %}` guards.
+
+### CLI-style vs SDK-style prompts
+
+The SDK backend (`anthropic_api`) sees only the prompt text — no working
+tree. So prompts for it should embed the relevant context:
+
+```jinja
+## Diff under review
+
+```diff
+{{ ctx.diff }}
+```
+```
+
+The CLI backend (`claude_code_cli`) gives the agent file-reading and shell
+tools, with `cwd` set to `ctx.repo_path`. Prompts should point the agent at
+the commit and let it pull what it needs:
+
+```jinja
+Inspect commit {{ ctx.commit_sha }} on branch {{ ctx.branch }} using
+`git show` / `git diff` and targeted file reads. Output ONLY the markdown
+report — no preamble.
+```
+
+The repo ships one CLI-style prompt today (`prompts/security_audit_cli.md`)
+as a reference shape. SDK-style prompts for `pages_changed.md`,
+`qa_plan.md`, `security_audit.md` continue to ship and are wired to the
+default reference workflow.
 
 ## Validation
 

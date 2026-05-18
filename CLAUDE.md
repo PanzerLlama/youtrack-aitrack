@@ -52,7 +52,7 @@ bd close <id>         # Complete work
 
 ## Mission
 
-`youtrack-aitrack` is a YAML-driven workflow engine that runs AI-agent actions in response to YouTrack issue events (status changes, etc.). Each workflow declares one trigger and a sequence of actions; an engine matches events against triggers and dispatches actions in parallel where possible.
+`youtrack-aitrack` is a vendor-agnostic AI agent orchestrator for YouTrack issue events. A YAML workflow declares one trigger and a sequence of actions; an engine matches events against triggers and dispatches actions in parallel where possible. Each `ai_report` action routes through an `AgentRunner` backend — the same Protocol covers shelling out to local CLI agents (Claude Code today; future Codex / Gemini / Aider) and calling the Anthropic SDK.
 
 **First reference workflow** — when an issue moves to `Ready for testing`, three parallel AI reports run (Security/PCI audit, Pages Changed for UI review, QA Plan for manual browser testing) and write back to the issue's custom fields.
 
@@ -62,15 +62,17 @@ bd close <id>         # Complete work
 
 ```
 src/youtrack_aitrack/
-├── domain/         # Pure. Pydantic models: Workflow, Trigger, Action, Context, RunState
-├── engine/         # Trigger matching, action scheduling, run lifecycle
+├── domain/         # Pure. Pydantic models: Workflow, Trigger, Action, Context, RunState, AgentRunner Protocol
+├── engine/         # Trigger matching, action scheduling, run lifecycle, idempotency
 ├── registry/       # Decorator-based plugin registries (trigger types, action types)
 ├── adapters/
 │   ├── youtrack/   # YT REST client (httpx async)
 │   ├── git/        # Branch resolve, diff extraction (subprocess git)
-│   ├── llm/        # Anthropic client wrapper, prompt rendering
+│   ├── llm/        # AnthropicLLMClient + AnthropicAgentRunner shim, Jinja prompt renderer
+│   ├── cli/        # ClaudeCodeCliRunner (spawns `claude -p`); future Codex/Gemini live here
 │   └── storage/    # Run logs, cache, state persistence (JSON files)
 ├── config/         # YAML loader, schema validation, env loading
+├── runtime/        # Composition root: wire(), ActionFactory, agent registry, Runner, Poller
 └── cli/            # Typer commands
 ```
 
@@ -108,27 +110,27 @@ trigger:
   type: status_change
   to_state: "Ready for testing"
   from_state: "*"
-context:
-  branch_pattern: "{task_id}-*"           # overrides instance default
 actions:
   - id: security_audit
     type: ai_report
     inputs: [git_diff, task_meta]
+    agent: claude_code_cli                # optional; falls back to defaults.default_agent
     output: { kind: custom_field, name: "Security Audit" }
-    prompt: prompts/security_audit.md
+    prompt: security_audit_cli.md         # CLI-style prompt for the CLI backend
     model: claude-sonnet-4-6
   - id: pages_changed
     type: ai_report
     inputs: [git_diff, route_index]
+    # no `agent:` → uses defaults.default_agent (SDK by default)
     output: { kind: custom_field, name: "Pages Changed" }
-    prompt: prompts/pages_changed.md
+    prompt: pages_changed.md
     model: claude-sonnet-4-6
   - id: qa_plan
     type: ai_report
     inputs: [task_meta, dependency_outputs]
     depends_on: [pages_changed]
     output: { kind: custom_field, name: "QA Plan" }
-    prompt: prompts/qa_plan.md
+    prompt: qa_plan.md
     model: claude-sonnet-4-6
 on_failure:
   - set_field: { Audit Status: failed }
@@ -137,6 +139,8 @@ on_success:
 ```
 
 Schema is generated from pydantic models — single source of truth. Validated at startup; failure aborts launch with a precise error.
+
+Backend selection: each `ai_report` may set `agent: <backend-name>`. The shipping registry covers `anthropic_api` (SDK shim) and `claude_code_cli` (local subprocess). Unknown names fail at `wire()` time with the available list. Workflow-wide default lives in `defaults.default_agent`.
 
 ## Code quality — strict, enforced
 
@@ -208,6 +212,6 @@ Short alias `yta` available for all subcommands.
 
 MIT.
 
-## Status (today: 2026-05-09)
+## Status (today: 2026-05-18)
 
-Pre-implementation. Design locked. Bootstrap (epic-001) is the first work item. See `bd ready`.
+Beta. Core daemon path verified end-to-end against YouTrack Cloud. Phase 1 of the CLI-agent pivot is shipped (`AgentRunner` Protocol, `ClaudeCodeCliRunner`, per-action `agent:` field, bare/oauth modes, `--version` flag, stderr passthrough). Phase 2 (Codex/Gemini runners, CLI variants of pages_changed + qa_plan prompts, init flow refresh) is open as a separate epic. See `bd ready`.

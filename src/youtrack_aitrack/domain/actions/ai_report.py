@@ -35,6 +35,7 @@ class AiReportAction(ActionSpec):
     type: Literal["ai_report"] = "ai_report"
     prompt: str
     model: str
+    agent: str | None = None
 
     _llm: LLMClient = PrivateAttr()
     _renderer: PromptRenderer = PrivateAttr()

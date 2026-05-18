@@ -90,6 +90,9 @@ def _print_summary(reports: list[RunReport]) -> None:
 
 def _format_row(workflow_name: str, result: ActionResult, *, hook: bool) -> str:
     state = "skipped" if result.skipped else ("ok" if result.success else "fail")
-    note = result.skip_reason or result.error or ""
+    full_note = result.skip_reason or result.error or ""
+    note = full_note.splitlines()[0] if full_note else ""
+    if "\n" in full_note:
+        note += " (see run report for full error)"
     label = f"{result.action_id} (hook)" if hook else result.action_id
     return f"{workflow_name:<32} {label:<32} {state:<10} {note}"

@@ -147,6 +147,38 @@ async def test_ai_report_returns_failure_action_result_on_agent_runner_error() -
     assert result.error is not None and "backend died" in result.error
 
 
+@pytest.mark.asyncio
+async def test_ai_report_includes_stderr_in_error_when_available() -> None:
+    runner = _RecordingAgentRunner(
+        raise_on_run=AgentRunnerError("backend died", stderr="auth required\nrun `claude login`")
+    )
+    a = AiReportAction(id="a1", prompt="p", model="m", runner=runner)
+    result = await a.execute(_ctx())
+    assert result.error is not None
+    assert "backend died" in result.error
+    assert "stderr: auth required" in result.error
+    assert "claude login" in result.error
+
+
+@pytest.mark.asyncio
+async def test_ai_report_omits_stderr_section_when_runner_error_has_none() -> None:
+    runner = _RecordingAgentRunner(raise_on_run=AgentRunnerError("timeout exceeded"))
+    a = AiReportAction(id="a1", prompt="p", model="m", runner=runner)
+    result = await a.execute(_ctx())
+    assert result.error == "timeout exceeded"
+
+
+@pytest.mark.asyncio
+async def test_ai_report_truncates_oversized_stderr() -> None:
+    huge = "x" * (12 * 1024)
+    runner = _RecordingAgentRunner(raise_on_run=AgentRunnerError("died", stderr=huge))
+    a = AiReportAction(id="a1", prompt="p", model="m", runner=runner)
+    result = await a.execute(_ctx())
+    assert result.error is not None
+    assert "[truncated]" in result.error
+    assert len(result.error) < len(huge)
+
+
 def test_ai_report_agent_defaults_to_none() -> None:
     a = AiReportAction(id="a1", prompt="p", model="m")
     assert a.agent is None

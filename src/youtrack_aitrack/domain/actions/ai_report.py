@@ -14,6 +14,22 @@ from youtrack_aitrack.domain.run import ActionResult
 from youtrack_aitrack.registry import register_action
 
 _DEFAULT_TIMEOUT_S = 300.0
+_STDERR_CAP_BYTES = 8 * 1024
+
+
+def _format_error(exc: AgentRunnerError) -> str:
+    """Surface AgentRunnerError.stderr alongside the message so failed runs are diagnosable.
+
+    Caps stderr at 8KB to protect run-report JSON from runaway dumps. The
+    delimiter and ``stderr:`` prefix make the boundary recognisable to humans
+    skimming the run report and to any tooling that wants to split them back
+    apart.
+    """
+    if exc.stderr is None:
+        return str(exc)
+    capped = exc.stderr[:_STDERR_CAP_BYTES]
+    suffix = "" if len(exc.stderr) <= _STDERR_CAP_BYTES else "\n... [truncated]"
+    return f"{exc}\nstderr: {capped}{suffix}"
 
 
 class PromptRenderer(Protocol):
@@ -74,7 +90,7 @@ class AiReportAction(ActionSpec):
                 model=self.model,
             )
         except AgentRunnerError as exc:
-            return ActionResult(action_id=self.id, success=False, error=str(exc))
+            return ActionResult(action_id=self.id, success=False, error=_format_error(exc))
         return ActionResult(
             action_id=self.id,
             success=True,

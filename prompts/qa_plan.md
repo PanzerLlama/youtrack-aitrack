@@ -52,17 +52,21 @@ responsibility, not output of this report.
 
 ## Output format
 
-Reply in Markdown using exactly these three sections, in this order.
+Reply in Markdown using exactly these three sections, in this order. Label each
+section with a **bold** line exactly as shown — do NOT use Markdown `#`
+headings. The report is written into a YouTrack custom field whose name label is
+small; `#` headings render larger than that label and invert the visual
+hierarchy.
 
-## Summary
+**Summary**
 
 2-3 sentences. What is in scope, where the tester should focus first.
 
-## Scenarios
+**Scenarios**
 
 A flat list of scenario blocks. Each scenario uses this shape:
 
-### [P1] <scenario name>
+**[P1] <scenario name>**
 **Pre-conditions:** <single sentence: who is logged in, what state>.
 
 **Steps:**
@@ -74,10 +78,10 @@ A flat list of scenario blocks. Each scenario uses this shape:
 - <observable outcome>
 - <observable outcome>
 
-Tag each scenario heading with `[P1]` or `[P2]`. List P1 scenarios first, then
+Tag each scenario label with `[P1]` or `[P2]`. List P1 scenarios first, then
 P2. If the report yields nothing testable in a band, omit that band entirely.
 
-## Regression Watchlist
+**Regression Watchlist**
 
 A short bulleted list of areas not directly changed but plausibly impacted by
 the change (shared layouts, navigation, auth, billing, etc.). For each entry

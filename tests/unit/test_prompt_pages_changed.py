@@ -95,15 +95,19 @@ output exactly one line and stop:
 No user-visible changes — nothing to review.
 ```
 
-Otherwise reply using exactly these four sections, in this order:
+Otherwise reply using exactly these four sections, in this order. Label each
+section with a **bold** line exactly as shown — do NOT use Markdown `#`
+headings. The report is written into a YouTrack custom field whose name label is
+small; `#` headings render larger than that label and invert the visual
+hierarchy.
 
-## Summary
+**Summary**
 
 2-3 sentences in product language. State what an end user could notice without
 naming files, frameworks, or components. Example: "A new Export button is added
 to the customer list. One form field label changed on the customer edit screen."
 
-## Screens to check
+**Screens to check**
 
 A bulleted list. One bullet per screen the reviewer should actually open. Use
 one of the two shapes below.
@@ -115,7 +119,7 @@ that the path could not be resolved to a clickable link. Use this shape:
 
 If no file in the diff maps to a screen, write "No screens to open."
 
-## Text / copy changes
+**Text / copy changes**
 
 A table of every user-visible string added, changed, or removed. Columns:
 
@@ -132,7 +136,7 @@ after the table — those need a translation-file review but not visual review.
 
 If there are no copy changes, write "No copy changes."
 
-## What to look for visually
+**What to look for visually**
 
 A bulleted list of concrete visual checks. Phrase as observations to make, not
 test instructions. Example shape:

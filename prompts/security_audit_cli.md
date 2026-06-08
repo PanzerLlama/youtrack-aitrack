@@ -53,14 +53,17 @@ Output ONLY the markdown report below. No preamble ("I will inspect...",
 used. The text you produce is piped verbatim into the issue's "Security
 Audit" custom field.
 
-Use exactly these three sections, in this order:
+Use exactly these three sections, in this order. Label each section with a
+**bold** line exactly as shown — do NOT use Markdown `#` headings. The report
+is written into a YouTrack custom field whose name label is small; `#` headings
+render larger than that label and invert the visual hierarchy.
 
-## Summary
+**Summary**
 
 One short paragraph (2-4 sentences) stating the overall risk posture of
 the change and whether it appears safe to ship.
 
-## Findings
+**Findings**
 
 A list of findings. If there are none, write "No security-relevant findings."
 Each finding MUST follow this shape:
@@ -77,7 +80,7 @@ Severities:
 - medium: input-validation gaps, weak crypto, risky defaults.
 - low: defense-in-depth, hardening suggestions.
 
-## Recommendations
+**Recommendations**
 
 A short bulleted list of follow-up actions (rotate a key, add a test, gate
 a flag). Skip this section entirely if there are no findings.

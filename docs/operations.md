@@ -32,6 +32,25 @@ Both `yta run` and `yta poll` accept these flags. Combine freely.
 
 `--dry-run` and `--stub-llm` are orthogonal. `--force` is independent of both.
 
+## What a run shows
+
+On an interactive terminal, `yta run` renders a live region while the
+workflow executes: each action's state (pending → running → ok / fail /
+skipped) with a running elapsed timer, so a multi-minute CLI-agent run never
+looks hung. The live region clears on completion, leaving a final summary:
+
+```
+WORKFLOW                     ACTION              STATE     TIME  NOTE
+ready-for-testing-audit      security_audit      ok       1m02s
+ready-for-testing-audit      pages_changed       ok       48.0s
+ready-for-testing-audit      qa_plan             ok       55.4s
+=== ready-for-testing-audit: DONE
+```
+
+The `TIME` column is each action's wall-clock duration. When stdout is not a
+terminal (pipes, CI, the daemon), the live region is skipped and only the
+final summary prints — so logs stay clean.
+
 ## Recommended testing sequence
 
 When you first set up the daemon against a new project, walk the staircase

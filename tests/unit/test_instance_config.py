@@ -36,7 +36,7 @@ def test_load_happy_path_with_defaults(tmp_path: Path) -> None:
     assert cfg.youtrack.token == "tk"
     assert cfg.youtrack.project == "ABC"
     assert cfg.anthropic.api_key == "sk"
-    assert cfg.anthropic.default_model == "claude-sonnet-4-6"
+    assert cfg.defaults.default_agent == "claude_code_cli"
     assert cfg.paths.workflows_dir == Path("workflows")
     assert cfg.paths.prompts_dir == Path("prompts")
     assert cfg.paths.runs_dir == Path("runs")
@@ -68,7 +68,6 @@ youtrack:
   project: P
 anthropic:
   api_key: k
-  default_model: claude-opus-4-7
 paths:
   workflows_dir: my-workflows
   prompts_dir: my-prompts
@@ -79,7 +78,6 @@ defaults:
 """
     path = _write(tmp_path, "config.yaml", text)
     cfg = load_instance_config(path, env={})
-    assert cfg.anthropic.default_model == "claude-opus-4-7"
     assert cfg.paths.workflows_dir == Path("my-workflows")
     assert cfg.paths.prompts_dir == Path("my-prompts")
     assert cfg.paths.runs_dir == Path("my-runs")

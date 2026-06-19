@@ -8,6 +8,28 @@ file before upgrading.
 
 ## [Unreleased]
 
+### Removed
+
+- **`anthropic_api` SDK backend**. The direct-API `AgentRunner`
+  (`AnthropicAgentRunner` + `AnthropicLLMClient`, `adapters/llm/anthropic.py`)
+  is dropped; `claude_code_cli` is now the sole execution path. The SDK path
+  only inlined the git diff into the prompt, so the model had no way to
+  explore the repository — the CLI agent does, via its own file/git tools.
+  This completes the CLI pivot rather than reversing it (Phase 2 keeps adding
+  CLI backends under the same Protocol).
+- **`anthropic.default_model` config field**. Now dead — the CLI takes its
+  model from the per-action `model:` field, falling back to the `claude`
+  CLI's own default when omitted.
+- The `anthropic` runtime dependency, now unused.
+
+### Changed
+
+- **BREAKING**: `defaults.default_agent` now defaults to `claude_code_cli`
+  (was `anthropic_api`). Configs that relied on the old default, or that set
+  `agent: anthropic_api` on any action, must switch to `claude_code_cli`.
+- `anthropic.api_key` is retained but is now only consumed by
+  `claude_code_cli` in `cli_agent_mode: bare`; it is unused in `oauth` mode.
+
 ## [0.2.0b0] — 2026-05-18
 
 This release pivots the AI-agent backend from "single Anthropic SDK

@@ -45,7 +45,6 @@ class YouTrackSection(BaseModel):
 
 class AnthropicSection(BaseModel):
     api_key: str
-    default_model: str = "claude-sonnet-4-6"
 
     model_config = ConfigDict(frozen=True)
 
@@ -65,7 +64,7 @@ class DefaultsSection(BaseModel):
     base_url: str | None = None
     git_base_branch: str = "main"
     include_tags: list[str] = Field(default_factory=list)
-    default_agent: str = "anthropic_api"
+    default_agent: str = "claude_code_cli"
     agent_timeout_seconds: int = 300
     cli_agent_concurrency: int = 1
     cli_agent_mode: Literal["bare", "oauth"] = "oauth"

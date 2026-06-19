@@ -19,8 +19,7 @@ youtrack:
   project: ${YOUTRACK_PROJECT}
 
 anthropic:
-  api_key: ${ANTHROPIC_API_KEY}
-  default_model: claude-sonnet-4-6
+  api_key: ${ANTHROPIC_API_KEY}           # only needed when cli_agent_mode is 'bare'
 
 paths:
   workflows_dir: workflows
@@ -32,6 +31,8 @@ defaults:
   poll_interval_seconds: 60
   poll_lookback_seconds: 3600              # first-poll window (1h); subsequent polls use cursor
   git_base_branch: main                    # base for 'git diff --merge-base <base> <branch>'
+  default_agent: claude_code_cli           # AgentRunner backend; only one ships today
+  cli_agent_mode: oauth                    # 'oauth' uses `claude login`; 'bare' needs the API key
   # base_url: https://staging.example.com   # optional; enables clickable URLs in pages_changed
   # include_tags: [daemon-test, backend]    # optional; empty/absent = process all issues
 """

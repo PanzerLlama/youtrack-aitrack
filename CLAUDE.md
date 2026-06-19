@@ -52,7 +52,7 @@ bd close <id>         # Complete work
 
 ## Mission
 
-`youtrack-aitrack` is a vendor-agnostic AI agent orchestrator for YouTrack issue events. A YAML workflow declares one trigger and a sequence of actions; an engine matches events against triggers and dispatches actions in parallel where possible. Each `ai_report` action routes through an `AgentRunner` backend — the same Protocol covers shelling out to local CLI agents (Claude Code today; future Codex / Gemini / Aider) and calling the Anthropic SDK.
+`youtrack-aitrack` is a vendor-agnostic AI agent orchestrator for YouTrack issue events. A YAML workflow declares one trigger and a sequence of actions; an engine matches events against triggers and dispatches actions in parallel where possible. Each `ai_report` action routes through an `AgentRunner` backend — the Protocol covers shelling out to local CLI agents (Claude Code today; future Codex / Gemini / Aider), which inspect the working tree directly via their own file/git tools rather than relying on an embedded diff.
 
 **First reference workflow** — when an issue moves to `Ready for testing`, three parallel AI reports run (Security/PCI audit, Pages Changed for UI review, QA Plan for manual browser testing) and write back to the issue's custom fields.
 
@@ -68,7 +68,7 @@ src/youtrack_aitrack/
 ├── adapters/
 │   ├── youtrack/   # YT REST client (httpx async)
 │   ├── git/        # Branch resolve, diff extraction (subprocess git)
-│   ├── llm/        # AnthropicLLMClient + AnthropicAgentRunner shim, Jinja prompt renderer
+│   ├── llm/        # Jinja prompt renderer
 │   ├── cli/        # ClaudeCodeCliRunner (spawns `claude -p`); future Codex/Gemini live here
 │   └── storage/    # Run logs, cache, state persistence (JSON files)
 ├── config/         # YAML loader, schema validation, env loading
@@ -121,7 +121,7 @@ actions:
   - id: pages_changed
     type: ai_report
     inputs: [git_diff, route_index]
-    # no `agent:` → uses defaults.default_agent (SDK by default)
+    # no `agent:` → uses defaults.default_agent (claude_code_cli by default)
     output: { kind: custom_field, name: "Pages Changed" }
     prompt: pages_changed.md
     model: claude-sonnet-4-6
@@ -140,7 +140,7 @@ on_success:
 
 Schema is generated from pydantic models — single source of truth. Validated at startup; failure aborts launch with a precise error.
 
-Backend selection: each `ai_report` may set `agent: <backend-name>`. The shipping registry covers `anthropic_api` (SDK shim) and `claude_code_cli` (local subprocess). Unknown names fail at `wire()` time with the available list. Workflow-wide default lives in `defaults.default_agent`.
+Backend selection: each `ai_report` may set `agent: <backend-name>`. The shipping registry covers `claude_code_cli` (local subprocess) in two auth modes — `oauth` (subscription login) and `bare` (`ANTHROPIC_API_KEY`); Phase 2 adds further CLI backends (Codex / Gemini) under the same Protocol. Unknown names fail at `wire()` time with the available list. Workflow-wide default lives in `defaults.default_agent`.
 
 ## Code quality — strict, enforced
 

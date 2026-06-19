@@ -82,7 +82,7 @@ def test_scaffolded_config_loads_with_env(tmp_path: Path) -> None:
     assert inst.youtrack.url == "https://yt.example.com"
     assert inst.youtrack.token == "tk"
     assert inst.anthropic.api_key == "sk"
-    assert inst.anthropic.default_model == "claude-sonnet-4-6"
+    assert inst.defaults.default_agent == "claude_code_cli"
     assert inst.defaults.branch_pattern == "{task_id}-*"
 
 

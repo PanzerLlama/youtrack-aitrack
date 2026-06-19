@@ -158,8 +158,8 @@ def _build_poller(
         actions=[SetFieldAction(id="mark", fields={"Status": "audited"})],
     )
     factory = ActionFactory(
-        agents={"anthropic_api": _FakeLLM()},
-        default_agent="anthropic_api",
+        agents={"claude_code_cli": _FakeLLM()},
+        default_agent="claude_code_cli",
         renderer=_FakeRenderer(),
         writer=writer,
         poster=_FakePoster(),

@@ -7,15 +7,14 @@
 - Git CLI on `PATH` (used by the daemon to resolve branches and diff against
   your base branch).
 - A YouTrack instance you can authenticate against (Cloud or self-hosted).
-- An **agent backend** — at least one of:
-  - **`anthropic_api`**: an Anthropic API key (SDK path, embedded-diff
-    prompts, single request per action).
-  - **`claude_code_cli`** *(recommended for production)*: the
-    [Claude Code CLI](https://docs.claude.com/en/docs/claude-code) on
-    `PATH` plus, for daemon-friendly bare mode, an `ANTHROPIC_API_KEY`
-    that the spawned `claude --bare -p` subprocess uses for auth.
+- The **`claude_code_cli`** agent backend: the
+  [Claude Code CLI](https://docs.claude.com/en/docs/claude-code) on
+  `PATH`, plus — for daemon-friendly bare mode — an `ANTHROPIC_API_KEY`
+  that the spawned `claude --bare -p` subprocess uses for auth.
 
-You can configure both backends and pick per workflow / per action; see
+`claude_code_cli` is the sole shipping backend today (Phase 2 adds further
+CLI backends — Codex / Gemini — under the same `AgentRunner` Protocol).
+Pick its auth mode (`oauth` vs `bare`) per workflow / per action; see
 [configuration.md](./configuration.md#agent-backends).
 
 ## Install the CLI
@@ -63,15 +62,14 @@ Fill in:
 YOUTRACK_URL=https://your-org.example.com/youtrack
 YOUTRACK_TOKEN=perm:...
 YOUTRACK_PROJECT=ABC
-ANTHROPIC_API_KEY=sk-ant-...     # required for anthropic_api backend
-                                  # and for claude_code_cli in bare mode
+ANTHROPIC_API_KEY=sk-ant-...     # required for claude_code_cli in bare mode
+                                  # (not used in oauth mode)
 ```
 
-`ANTHROPIC_API_KEY` is consumed in two places: by the `anthropic_api`
-backend for its SDK call, and by the `claude_code_cli` backend when running
-in bare mode (it gets pushed into the spawned subprocess env so
-`claude --bare -p` can authenticate without OAuth). Setting it once covers
-both backends.
+`ANTHROPIC_API_KEY` is consumed by the `claude_code_cli` backend only when
+running in bare mode: it gets pushed into the spawned subprocess env so
+`claude --bare -p` can authenticate without OAuth. In `oauth` mode the
+key is not used at all (the subprocess reuses your `claude login` session).
 
 ### Getting a YouTrack token
 
@@ -126,18 +124,19 @@ Field names are case-sensitive and must match exactly what's in the workflow
 YAML. Only YouTrack `text` and `string` types are supported in v1 (no enum,
 state, user, build, etc.).
 
-## Pick a default backend
+## Pick an auth mode
 
 The fresh `config.yaml` from `yta init` sets:
 
 ```yaml
 defaults:
-  default_agent: anthropic_api    # SDK path; uses ANTHROPIC_API_KEY directly
+  default_agent: claude_code_cli
+  cli_agent_mode: oauth           # reuses your `claude login` subscription
 ```
 
-For production daemon use, switch to the CLI agent backend in bare mode —
-predictable per-call cost, no local CLAUDE.md/hook/plugin leakage into
-prompts, agent inspects the working tree directly:
+For production daemon use, switch to bare mode — predictable per-call cost,
+no local CLAUDE.md/hook/plugin leakage into prompts (the agent still has
+full code context through its own file/git tools):
 
 ```yaml
 defaults:
@@ -147,13 +146,13 @@ defaults:
   agent_timeout_seconds: 300      # per-action wall-clock cap
 ```
 
-`cli_agent_mode: oauth` is the alternative — it reuses your local
-`claude login` subscription. Useful for one-off interactive testing but
-ill-suited to unattended daemons because the spawned `claude -p` re-loads
-your global `~/.claude/CLAUDE.md`, project `CLAUDE.md`, hooks, plugins,
-and MCP tool definitions on every invocation. That overhead silently
-inflates request size and burns API TPM budget before the daemon prompt
-content is even sent.
+`cli_agent_mode: oauth` (the default) reuses your local `claude login`
+subscription and bypasses the API org TPM tier. Useful for one-off
+interactive testing but ill-suited to unattended daemons because the
+spawned `claude -p` re-loads your global `~/.claude/CLAUDE.md`, project
+`CLAUDE.md`, hooks, plugins, and MCP tool definitions on every invocation.
+That overhead makes the input less predictable and inflates request size
+before the daemon prompt content is even sent.
 
 See [configuration.md](./configuration.md#agent-backends) for every option.
 

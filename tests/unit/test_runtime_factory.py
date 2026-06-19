@@ -69,11 +69,11 @@ def _factory(
     writer: _FakeWriter | None = None,
     poster: _FakePoster | None = None,
     agents: dict[str, AgentRunner] | None = None,
-    default_agent: str = "anthropic_api",
+    default_agent: str = "claude_code_cli",
     agent_timeout_seconds: float = 300.0,
 ) -> ActionFactory:
     return ActionFactory(
-        agents=agents or {"anthropic_api": _FakeAgentRunner("anthropic")},
+        agents=agents or {"claude_code_cli": _FakeAgentRunner("cli")},
         default_agent=default_agent,
         renderer=_FakeRenderer(),
         writer=writer or _FakeWriter(),
@@ -84,8 +84,8 @@ def _factory(
 
 def test_materialize_ai_report_injects_runner_and_renderer() -> None:
     spec = AiReportAction(id="a", prompt="security_audit.md", model="claude-sonnet-4-6")
-    runner = _FakeAgentRunner("anthropic")
-    materialized = _factory(agents={"anthropic_api": runner}).materialize(spec)
+    runner = _FakeAgentRunner("cli")
+    materialized = _factory(agents={"claude_code_cli": runner}).materialize(spec)
     assert isinstance(materialized, AiReportAction)
     assert materialized.prompt == "security_audit.md"
     assert materialized.model == "claude-sonnet-4-6"
@@ -94,24 +94,24 @@ def test_materialize_ai_report_injects_runner_and_renderer() -> None:
 
 
 def test_materialize_ai_report_routes_to_named_agent_when_set() -> None:
-    spec = AiReportAction(id="a", prompt="p.md", model="m", agent="claude_code_cli")
+    spec = AiReportAction(id="a", prompt="p.md", model="m", agent="codex_cli")
     cli_runner = _FakeAgentRunner("cli")
-    sdk_runner = _FakeAgentRunner("sdk")
+    codex_runner = _FakeAgentRunner("codex")
     materialized = _factory(
-        agents={"anthropic_api": sdk_runner, "claude_code_cli": cli_runner}
+        agents={"claude_code_cli": cli_runner, "codex_cli": codex_runner}
     ).materialize(spec)
-    assert cast(AiReportAction, materialized)._runner is cli_runner
+    assert cast(AiReportAction, materialized)._runner is codex_runner
 
 
 def test_materialize_ai_report_uses_default_agent_when_unset() -> None:
     spec = AiReportAction(id="a", prompt="p.md", model="m")  # agent None
     cli_runner = _FakeAgentRunner("cli")
-    sdk_runner = _FakeAgentRunner("sdk")
+    codex_runner = _FakeAgentRunner("codex")
     materialized = _factory(
-        agents={"anthropic_api": sdk_runner, "claude_code_cli": cli_runner},
-        default_agent="anthropic_api",
+        agents={"claude_code_cli": cli_runner, "codex_cli": codex_runner},
+        default_agent="claude_code_cli",
     ).materialize(spec)
-    assert cast(AiReportAction, materialized)._runner is sdk_runner
+    assert cast(AiReportAction, materialized)._runner is cli_runner
 
 
 def test_materialize_ai_report_raises_for_unknown_agent() -> None:
@@ -123,7 +123,7 @@ def test_materialize_ai_report_raises_for_unknown_agent() -> None:
 def test_factory_rejects_default_agent_not_in_registry() -> None:
     with pytest.raises(ValueError, match="default_agent 'codex_cli'"):
         ActionFactory(
-            agents={"anthropic_api": _FakeAgentRunner()},
+            agents={"claude_code_cli": _FakeAgentRunner()},
             default_agent="codex_cli",
             renderer=_FakeRenderer(),
             writer=_FakeWriter(),
@@ -152,7 +152,7 @@ def test_materialize_yt_comment_injects_poster() -> None:
 def test_materialize_workflow_rewires_all_action_groups() -> None:
     writer = _FakeWriter()
     poster = _FakePoster()
-    runner = _FakeAgentRunner("anthropic")
+    runner = _FakeAgentRunner("cli")
     wf = Workflow(
         name="wf",
         trigger=ManualTrigger(),
@@ -165,7 +165,7 @@ def test_materialize_workflow_rewires_all_action_groups() -> None:
     )
 
     rewired = _factory(
-        writer=writer, poster=poster, agents={"anthropic_api": runner}
+        writer=writer, poster=poster, agents={"claude_code_cli": runner}
     ).materialize_workflow(wf)
 
     ai = cast(AiReportAction, rewired.actions[0])

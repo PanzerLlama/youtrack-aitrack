@@ -52,8 +52,7 @@ youtrack:
   project: ${YOUTRACK_PROJECT}
 
 anthropic:
-  api_key: ${ANTHROPIC_API_KEY}
-  default_model: claude-sonnet-4-6
+  api_key: ${ANTHROPIC_API_KEY}   # only used by claude_code_cli in bare mode
 
 paths:
   workflows_dir: workflows
@@ -65,7 +64,7 @@ defaults:
   poll_interval_seconds: 60
   poll_lookback_seconds: 3600
   git_base_branch: main
-  default_agent: anthropic_api    # which AgentRunner backend to use when an action does not override
+  default_agent: claude_code_cli  # which AgentRunner backend to use when an action does not override
   agent_timeout_seconds: 300      # per-action wall-clock cap
   cli_agent_concurrency: 1        # shared semaphore size for all CLI-spawning backends
   cli_agent_mode: oauth           # 'bare' (API key auth, no local context loaded) | 'oauth' (uses claude login)
@@ -85,8 +84,7 @@ defaults:
 
 | Field | Type | Default | Notes |
 |---|---|---|---|
-| `api_key` | string | required | From `console.anthropic.com`. Stored in `.env`, expanded via `${ANTHROPIC_API_KEY}`. |
-| `default_model` | string | `claude-sonnet-4-6` | Used by workflow YAMLs that don't override per-action. Any model the Anthropic SDK accepts (`claude-opus-4-7`, `claude-haiku-4-5-20251001`, etc.). |
+| `api_key` | string | required for `bare` mode | From `console.anthropic.com`. Stored in `.env`, expanded via `${ANTHROPIC_API_KEY}`. Used only by `claude_code_cli` when `cli_agent_mode: bare`; ignored in `oauth` mode. |
 
 ### `paths` section
 
@@ -106,8 +104,8 @@ defaults:
 | `git_base_branch` | string | `main` | The base for `git diff --merge-base <base> <branch>`. Set to your repo's actual default branch (`master`, `develop`, etc.) if it isn't `main`. |
 | `base_url` | string | `null` | Optional. When set, the `pages_changed` reference prompt instructs the LLM to prefix inferred routes with this URL to produce clickable links in the report. |
 | `include_tags` | list[string] | `[]` (empty = no filter) | Daemon mode only: drop events whose issue doesn't have at least one of these YouTrack tags. Useful for scoping the daemon to a subset of issues on a shared instance. `yta run` bypasses this filter. |
-| `default_agent` | string | `anthropic_api` | Which `AgentRunner` backend to use when a workflow action does not set its own `agent:` field. Shipping backends: `anthropic_api`, `claude_code_cli`. See [agent backends](#agent-backends) for the contract each fulfils and the picking criteria. |
-| `agent_timeout_seconds` | int | `300` | Per-action wall-clock budget. The `AgentRunner` is given this as `timeout_s`; CLI backends kill the spawned subprocess on overrun, SDK backends honour the SDK's own timeout (typically lower). |
+| `default_agent` | string | `claude_code_cli` | Which `AgentRunner` backend to use when a workflow action does not set its own `agent:` field. `claude_code_cli` is the only shipping backend today (Phase 2 adds Codex / Gemini). See [agent backends](#agent-backends) for the contract it fulfils. |
+| `agent_timeout_seconds` | int | `300` | Per-action wall-clock budget. The `AgentRunner` is given this as `timeout_s`; the CLI backend kills the spawned subprocess on overrun. |
 | `cli_agent_concurrency` | int | `1` | Size of the `asyncio.Semaphore` shared across all CLI-spawning backends. `1` serialises every `claude -p` / `codex` / `gemini` spawn — safest default for rate-limit-sensitive accounts. Bump cautiously after measuring your provider's TPM budget. |
 | `cli_agent_mode` | `bare` / `oauth` | `oauth` | How `claude_code_cli` authenticates its spawned subprocess. `bare` passes `--bare` and pushes `ANTHROPIC_API_KEY` into the subprocess env (no local CLAUDE.md, no hooks, no plugins — daemon-friendly). `oauth` reuses the user's `claude login` keychain and loads all local context (handy for interactive testing, NOT recommended for daemons). |
 
@@ -119,8 +117,11 @@ shipping registry:
 
 | Backend name | Implementation | Auth | Behavior |
 |---|---|---|---|
-| `anthropic_api` | `AnthropicAgentRunner` (wraps `AnthropicLLMClient`) | `anthropic.api_key` | Single SDK call per action. Prompt carries the full `git diff` embedded; model has no working-tree access. |
 | `claude_code_cli` | `ClaudeCodeCliRunner` | `cli_agent_mode` (above) | Spawns `claude -p` per action with `cwd=<repo>`. Prompt should instruct the agent to inspect the commit via its own git/file tools; no diff embedded. |
+
+`claude_code_cli` is the only backend that ships today. Phase 2 adds
+further CLI backends (Codex / Gemini) under the same `AgentRunner`
+Protocol — one adapter file each, registered alongside it.
 
 A workflow action selects its backend with:
 
@@ -129,25 +130,29 @@ A workflow action selects its backend with:
   type: ai_report
   agent: claude_code_cli       # overrides default_agent for this action only
   prompt: security_audit_cli.md
-  model: claude-sonnet-4-6
+  model: claude-sonnet-4-6     # optional; omit to use claude's own default model
 ```
 
 Omit `agent:` to inherit `defaults.default_agent`. Passing an unknown name
-fails at `wire()` time with the available backends listed.
+fails at `wire()` time with the available backends listed. The per-action
+`model:` is passed through to the spawned `claude -p`; when omitted, the CLI
+falls back to claude's own default model.
 
-### Picking a backend
+### Picking an auth mode
 
-- **`claude_code_cli` (recommended for production)**: scales with PR size
-  because the agent reads files on demand instead of receiving the full
-  diff inline. Plays well with frameworks where routing/dependencies are
-  decoupled from file paths. Requires `claude` on `PATH`. Use bare mode
-  (`cli_agent_mode: bare`) for daemons — `oauth` mode loads your local
-  CLAUDE.md/hooks/plugins on every spawn, which silently inflates each
-  request's input tokens and can burst past per-minute rate limits.
-- **`anthropic_api`**: lower latency single-shot reports, no local CLI
-  install required. Each prompt carries the full diff inline, so cost
-  and request size scale linearly with PR size. Prefer this for small,
-  focused PRs or for environments where the CLI binary isn't available.
+`claude_code_cli` scales with PR size because the agent reads files on
+demand through its own tools instead of receiving a diff inline. Requires
+`claude` on `PATH`. Choose how it authenticates via `cli_agent_mode`:
+
+- **`bare` (recommended for daemons)**: passes `--bare`, authenticates via
+  `ANTHROPIC_API_KEY`, and skips local CLAUDE.md/hooks/plugins. The input is
+  deterministic and predictable — and the agent still has full code context
+  through its own file/git tools, so this is not a context-less path.
+- **`oauth` (default)**: reuses your `claude login` subscription and bypasses
+  the API org TPM tier. Loads your local CLAUDE.md/hooks/plugins on every
+  spawn, which makes the input less predictable and inflates each request's
+  size. Good for one-off interactive testing; ill-suited to unattended
+  daemons.
 
 ## CLI override flags
 

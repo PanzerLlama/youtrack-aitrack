@@ -11,7 +11,6 @@ from typing import Protocol
 
 from youtrack_aitrack.adapters.cli.claude_code import ClaudeCodeCliRunner
 from youtrack_aitrack.adapters.git.diff import GitDiffAdapter, GitDiffError
-from youtrack_aitrack.adapters.llm.anthropic import AnthropicAgentRunner, AnthropicLLMClient
 from youtrack_aitrack.adapters.llm.jinja import JinjaPromptRenderer
 from youtrack_aitrack.adapters.storage.runs import JsonRunStore
 from youtrack_aitrack.adapters.youtrack.client import YouTrackClient
@@ -223,11 +222,11 @@ def _as_idempotency_store(store: JsonRunStore) -> IdempotencyStore:
 def _build_agents(config: InstanceConfig, *, stub_llm: bool) -> dict[str, AgentRunner]:
     """Construct the AgentRunner registry for this instance.
 
-    With ``stub_llm=True`` every registered backend is the same StubAgentRunner
-    so workflows can be exercised without spending tokens or shelling out, no
-    matter which ``agent`` they declare. Otherwise both real backends are
-    registered eagerly; the CLI runner's subprocess is only spawned on actual
-    invocation, so registering it costs nothing if no workflow uses it.
+    With ``stub_llm=True`` the lone backend is a StubAgentRunner so workflows
+    can be exercised without spending tokens or shelling out. Otherwise the CLI
+    runner is registered; its subprocess is only spawned on actual invocation,
+    so registering it costs nothing if no workflow uses it. Phase 2 adds further
+    CLI backends (Codex / Gemini) under the same Protocol — one entry each.
 
     When ``cli_agent_mode='bare'`` the CLI runner is constructed with
     ``bare=True`` and ANTHROPIC_API_KEY pushed into its subprocess env, so
@@ -239,14 +238,8 @@ def _build_agents(config: InstanceConfig, *, stub_llm: bool) -> dict[str, AgentR
     waiting for the first spawn to crash.
     """
     if stub_llm:
-        stub = StubAgentRunner()
-        return {"anthropic_api": stub, "claude_code_cli": stub}
-    anthropic_runner = AnthropicAgentRunner(
-        AnthropicLLMClient(config.anthropic.api_key),
-        default_model=config.anthropic.default_model,
-    )
-    cli_runner = _build_cli_runner(config)
-    return {"anthropic_api": anthropic_runner, "claude_code_cli": cli_runner}
+        return {"claude_code_cli": StubAgentRunner()}
+    return {"claude_code_cli": _build_cli_runner(config)}
 
 
 def _build_cli_runner(config: InstanceConfig) -> ClaudeCodeCliRunner:

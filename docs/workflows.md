@@ -133,17 +133,15 @@ backend, returns the text.
 |---|---|---|
 | `prompt` | string | Path to a Jinja template, relative to `paths.prompts_dir`. |
 | `model` | string | Model id. Passed verbatim to the backend — accepts whatever the chosen backend accepts (`claude-sonnet-4-6`, `claude-opus-4-7`, the `sonnet`/`opus`/`haiku` aliases for the CLI backend, etc.). |
-| `agent` | string \| null | Backend name (`anthropic_api`, `claude_code_cli`, future `codex_cli` / `gemini_cli`). Omit to inherit `defaults.default_agent`. Unknown names fail at runtime composition. |
+| `agent` | string \| null | Backend name. Only `claude_code_cli` ships today (future `codex_cli` / `gemini_cli` arrive in Phase 2). Omit to inherit `defaults.default_agent`. Unknown names fail at runtime composition. |
 | `output` | OutputSpec | Where to write the agent's result. See below. |
 
-The two shipping backends are documented under
+The shipping backend is documented under
 [configuration.md > Agent backends](./configuration.md#agent-backends).
-Picking the right one matters for prompt design: the SDK backend embeds the
-git diff inline in your template, so prompts should reference
-`{{ ctx.diff }}`; the CLI backend gives the agent file-reading tools and
-no inline diff, so prompts should reference `{{ ctx.commit_sha }}` and
-`{{ ctx.repo_path }}` and instruct the agent to inspect the commit
-directly (see `prompts/security_audit_cli.md` for the reference shape).
+The CLI backend gives the agent file-reading tools and no inline diff, so
+prompts should reference `{{ ctx.commit_sha }}` and `{{ ctx.repo_path }}`
+and instruct the agent to inspect the commit directly (see
+`prompts/security_audit_cli.md` for the reference shape).
 
 #### `set_field`
 
@@ -274,22 +272,11 @@ Jinja uses `StrictUndefined` — typos like `ctx.branche` will raise at render
 time rather than silently producing empty strings. Always wrap optional
 variables in `{% if %}` guards.
 
-### CLI-style vs SDK-style prompts
-
-The SDK backend (`anthropic_api`) sees only the prompt text — no working
-tree. So prompts for it should embed the relevant context:
-
-```jinja
-## Diff under review
-
-```diff
-{{ ctx.diff }}
-```
-```
+### Writing prompts
 
 The CLI backend (`claude_code_cli`) gives the agent file-reading and shell
-tools, with `cwd` set to `ctx.repo_path`. Prompts should point the agent at
-the commit and let it pull what it needs:
+tools, with `cwd` set to `ctx.repo_path`. Prompts point the agent at the
+commit and let it pull what it needs — no diff is embedded in the prompt:
 
 ```jinja
 Inspect commit {{ ctx.commit_sha }} on branch {{ ctx.branch }} using
@@ -298,9 +285,8 @@ report — no preamble.
 ```
 
 The repo ships one CLI-style prompt today (`prompts/security_audit_cli.md`)
-as a reference shape. SDK-style prompts for `pages_changed.md`,
-`qa_plan.md`, `security_audit.md` continue to ship and are wired to the
-default reference workflow.
+as the reference shape to follow. CLI variants of `pages_changed.md` and
+`qa_plan.md` are a Phase 2 item.
 
 ## Validation
 

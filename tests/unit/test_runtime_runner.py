@@ -175,8 +175,8 @@ def _build(
     run_store = run_store or _FakeRunStore()
     state_lookup = state_lookup or _FakeStateLookup()
     factory = ActionFactory(
-        agents={"anthropic_api": llm},
-        default_agent="anthropic_api",
+        agents={"claude_code_cli": llm},
+        default_agent="claude_code_cli",
         renderer=_FakeRenderer(),
         writer=writer,
         poster=_FakePoster(),

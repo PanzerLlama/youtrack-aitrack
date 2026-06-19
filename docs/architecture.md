@@ -49,12 +49,12 @@ Pure pydantic models and Protocol interfaces. Stdlib + pydantic only.
 | `workflow.py` | `Workflow` (top-level YAML schema) |
 | `trigger.py` | `TriggerSpec` (data) + `Trigger` (Protocol) |
 | `action.py` | `ActionSpec` (data) + `Action` (Protocol) |
-| `agent_runner.py` | `AgentRunner` Protocol + `AgentResult` (frozen pydantic) + `AgentRunnerError`. The contract every backend (SDK or CLI) implements. |
+| `agent_runner.py` | `AgentRunner` Protocol + `AgentResult` (frozen pydantic) + `AgentRunnerError`. The contract every CLI backend implements. |
 | `output.py` | `OutputSpec` discriminated union + `OutputSink` Protocol |
 | `inputs.py` | `GitDiffProvider` Protocol |
 | `diff_filter.py` | Pure diff-trimming logic |
 | `triggers/status_change.py`, `manual.py` | Concrete trigger types |
-| `actions/ai_report.py`, `set_field.py`, `yt_comment.py` | Concrete action types. `ai_report` calls its injected `AgentRunner` — the same code path covers SDK and CLI backends. |
+| `actions/ai_report.py`, `set_field.py`, `yt_comment.py` | Concrete action types. `ai_report` calls its injected `AgentRunner` — one code path covers every CLI backend. |
 
 ### `engine/` — orchestration, still pure
 
@@ -74,7 +74,6 @@ Every Protocol from `domain/` is satisfied by exactly one adapter class.
 |---|---|---|
 | `youtrack/client.py` | `FieldWriter`, `CommentPoster`, `IssueStateLookup`, `ActivityFeed`, `IssueTagsLookup` | httpx async REST client |
 | `git/diff.py` | `GitDiffProvider` | `subprocess.run` wrapper around git CLI |
-| `llm/anthropic.py` | `AgentRunner` (via `AnthropicAgentRunner`) + low-level `AnthropicLLMClient` | wraps `anthropic.AsyncAnthropic`; the shim discards cwd/commit_sha (SDK has no working tree) and measures duration around the call |
 | `cli/claude_code.py` | `AgentRunner` (via `ClaudeCodeCliRunner`) | spawns `claude -p` / `claude --bare -p` as subprocess in the action's `cwd`; concurrency-gated by injected `asyncio.Semaphore`; combines stderr+stdout on non-zero exit |
 | `llm/jinja.py` | `PromptRenderer` | Jinja2 with `StrictUndefined` |
 | `storage/runs.py` | `RunStore` + `IdempotencyStore` | atomic-write JSON files |
@@ -160,20 +159,20 @@ backend registry at `wire()` time:
 
 ```python
 agents = {
-    "anthropic_api": AnthropicAgentRunner(...),
     "claude_code_cli": ClaudeCodeCliRunner(...),
+    # Phase 2 adds further CLI backends here: "codex_cli", "gemini_cli", ...
 }
 ```
 
 Each `ai_report` action declares an optional `agent: <name>` field; the
 factory looks the name up in the registry (falling back to
-`defaults.default_agent`) and injects that runner. Adding a new vendor —
-Codex, Gemini, Aider, Ollama — is one adapter file plus one line in
-`_build_agents`; no engine or schema changes. The `AgentRunner` Protocol's
-contract intentionally carries `cwd`, `commit_sha`, `model`, and `timeout_s`
-in its `run()` signature so the same call shape covers SDK-style backends
-(which accept and discard `cwd`/`commit_sha`) and CLI-style backends
-(which use them to spawn subprocesses against the actual repo state).
+`defaults.default_agent`) and injects that runner. `claude_code_cli` is the
+only backend shipping today; adding a new vendor — Codex, Gemini, Aider,
+Ollama — is one adapter file plus one line in `_build_agents`, with no
+engine or schema changes. The `AgentRunner` Protocol's contract carries
+`cwd`, `commit_sha`, `model`, and `timeout_s` in its `run()` signature so
+every CLI backend uses them to spawn subprocesses against the actual repo
+state.
 
 ## Why engine-driven, not LLM-driven
 
@@ -287,7 +286,7 @@ That's it. No engine changes, no registry changes.
 Adapters live in `adapters/<system>/`. Each implements one or more Protocols
 from `domain/`. Rules:
 
-- One module per external system. Nothing else imports the SDK or subprocess.
+- One module per external system. Nothing else spawns the subprocess.
 - Raise a typed exception on errors (`YouTrackError`, `GitDiffError`, etc.)
   rather than letting underlying library exceptions leak through.
 - Tests use `respx` for httpx-based adapters and tmp_path+real subprocess for git.

@@ -15,10 +15,10 @@ workflow declares one trigger (e.g. a status change) and a sequence of
 actions; an engine matches incoming events against triggers and dispatches
 matching actions, running independent steps concurrently and respecting
 `depends_on` for ordered work. Each action routes through an `AgentRunner`
-backend — the same Protocol covers shelling out to a local CLI agent
-(Claude Code, future Codex / Gemini / Aider) **and** calling the Anthropic
-SDK directly, so workflows can pick the backend that fits without rewriting
-the engine.
+backend — the Protocol covers shelling out to a local CLI agent (Claude
+Code today, future Codex / Gemini / Aider) that inspects the working tree
+directly via its own file/git tools, so adding a new vendor is one adapter,
+no engine rewrite.
 
 The reference workflow ships with the project: when an issue moves to
 `Ready for testing`, three parallel AI reports run — a security/PCI audit, a
@@ -32,17 +32,23 @@ without touching the workflow.
 One running daemon binds to one YouTrack project. Multi-project setups use
 multiple instances with separate configs.
 
-## Two backends, one engine
+## One agent backend, two auth modes
 
-| Backend | When to pick it |
+Execution goes through `claude_code_cli`: it spawns a local `claude -p` per
+action, and the agent inspects the working tree directly via its file/git
+tools — no diff is embedded in the prompt. That scales gracefully on large
+PRs and on frameworks where routing/dependencies are decoupled from file
+paths (Symfony, Rails, FastAPI). It authenticates in one of two modes:
+
+| `cli_agent_mode` | When to pick it |
 |---|---|
-| **`claude_code_cli`** (recommended) | Production daemon use. Spawns local `claude -p` per action; the agent inspects the working tree directly via its file-reading tools — no diff is embedded in the prompt. Scales gracefully on large PRs and on frameworks where routing/dependencies are decoupled from file paths (Symfony, Rails, FastAPI). |
-| **`anthropic_api`** | Lower latency single-shot reports; no local CLI install required; preference for SDK-style billing on a separate API key tier. Embeds the full diff in each prompt — request size scales linearly with PR size, and the model only sees what the diff carries. |
+| **`oauth`** (default) | Interactive use. Reuses your `claude login` subscription, bypassing the API org TPM tier. Loads local `CLAUDE.md` / hooks / plugins as context, so input size is less predictable — handy for testing, not ideal for daemons. |
+| **`bare`** | Daemon use. Passes `--bare` and authenticates via `ANTHROPIC_API_KEY`; skips local `CLAUDE.md` / hooks / plugins for deterministic, predictable per-call input. Still has full code context through the agent's own tools. |
 
-Pick per-action via the YAML `agent:` field, or set a workflow-wide default
-in `defaults.default_agent`. The reference workflow leaves `agent:` unset so
-it inherits the instance default; flip the default once and the same YAML
-runs against whichever backend you've configured.
+The per-action `agent:` field and `defaults.default_agent` select the
+backend by name; today only `claude_code_cli` ships. Phase 2 adds further
+CLI backends (Codex / Gemini) under the same `AgentRunner` Protocol — flip
+the default or set `agent:` per action once those land, no engine change.
 
 ## How this differs from a YouTrack MCP server
 
@@ -143,11 +149,11 @@ sequenceDiagram
     Note over D: cursor advanced, idempotency key recorded
 ```
 
-The `Agent backend` node above is `AnthropicAgentRunner` (single SDK call
-per action) or `ClaudeCodeCliRunner` (spawns `claude -p` per action, with
-filesystem and git tools available to the agent) depending on `agent:` /
-`default_agent`. Engine, runtime, and adapters never change — only the
-backend swaps.
+The `Agent backend` node above is `ClaudeCodeCliRunner` (spawns `claude -p`
+per action, with filesystem and git tools available to the agent), selected
+by `agent:` / `default_agent`. Future CLI backends register into the same
+registry — engine, runtime, and adapters never change; only the backend
+swaps.
 
 Every step is also a place where you can intervene: `--dry-run` swaps the
 YouTrack writer for a no-op so nothing lands in YT; `--stub-llm` swaps the
@@ -170,7 +176,7 @@ yta --version
 # Scaffold config
 yta init
 cp ~/.youtrack-aitrack/.env.example ~/.youtrack-aitrack/.env
-# ...edit .env with YouTrack URL, token, project, and ANTHROPIC_API_KEY...
+# ...edit .env with YouTrack URL, token, project (+ ANTHROPIC_API_KEY for bare mode)...
 
 # Copy the reference workflow + prompts (one-time)
 git clone https://github.com/PanzerLlama/youtrack-aitrack /tmp/yta-source
@@ -246,9 +252,8 @@ Inner rings never import from outer rings. `domain/` is pure pydantic +
 Protocols (no httpx, no anthropic, no subprocess). Adapters wrap external
 systems and implement the Protocols. `runtime/` is the composition root,
 which is also where backends register themselves into the agent registry
-(`anthropic_api` → `AnthropicAgentRunner`, `claude_code_cli` →
-`ClaudeCodeCliRunner`, future vendors as additional adapters). `cli/` is
-the entry point.
+(`claude_code_cli` → `ClaudeCodeCliRunner`, future vendors as additional
+adapters). `cli/` is the entry point.
 
 See [docs/architecture.md](./docs/architecture.md) for the full tour.
 

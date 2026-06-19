@@ -8,6 +8,18 @@ file before upgrading.
 
 ## [Unreleased]
 
+### Added
+
+- **Live progress for `yta run`**. On an interactive terminal the command now
+  shows a live region with each action's state (pending / running / ok / fail /
+  skipped) and a per-second elapsed timer, so a multi-minute CLI-agent run no
+  longer looks hung. Non-TTY callers (pipes, tests, daemons) are unaffected.
+- **Per-action wall-time** is measured for every action and recorded on
+  `ActionResult.duration_ms`; the final `yta run` summary gains a TIME column.
+- The engine emits `ProgressEvent`s through an optional `on_progress` callback
+  threaded from the runtime/CLI; `engine/` stays free of any renderer import.
+  (Per-action tokens/cost is tracked separately as a follow-up.)
+
 ### Removed
 
 - **`anthropic_api` SDK backend**. The direct-API `AgentRunner`

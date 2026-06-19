@@ -4,16 +4,19 @@ from __future__ import annotations
 
 import asyncio
 import re
+import sys
 from pathlib import Path
 
 import typer
+from rich.live import Live
 
+from youtrack_aitrack.cli.progress import ProgressDisplay
 from youtrack_aitrack.config import (
     InstanceConfigError,
     load_instance_config,
 )
 from youtrack_aitrack.domain.run import ActionResult, RunReport, RunState
-from youtrack_aitrack.runtime import build_runner
+from youtrack_aitrack.runtime import Runner, build_runner
 
 # YouTrack issue IDs are <PROJECT>-<NUMBER> where project is alphanumeric and
 # starts with a letter. We validate at the CLI boundary so the value can never
@@ -69,17 +72,53 @@ def run_command(
         stub_llm=stub_llm,
         workflow_names={workflow} if workflow is not None else None,
     )
-    reports = asyncio.run(runner.run(issue_id, force=force))
+    reports = _dispatch(runner, issue_id, force=force)
     _print_summary(reports)
     if any(r.state is RunState.FAILED for r in reports):
         raise typer.Exit(code=1)
+
+
+def _dispatch(runner: Runner, issue_id: str, *, force: bool) -> list[RunReport]:
+    """Run the workflows, showing a live progress region on an interactive TTY.
+
+    Non-TTY callers (tests, pipes, daemons) skip the rich Live region and run
+    plainly — the final summary is the persistent record either way.
+    """
+    if not sys.stdout.isatty():
+        return asyncio.run(runner.run(issue_id, force=force))
+    return asyncio.run(_dispatch_live(runner, issue_id, force=force))
+
+
+async def _dispatch_live(runner: Runner, issue_id: str, *, force: bool) -> list[RunReport]:
+    """Drive a rich Live region from the asyncio loop itself.
+
+    ``auto_refresh`` is off so refresh runs in this single event-loop thread —
+    the same thread the progress callback mutates state on — instead of rich's
+    background thread, which would race ``__rich__`` against ``handle``.
+    """
+    display = ProgressDisplay()
+    with Live(display, auto_refresh=False, transient=True) as live:
+
+        async def tick() -> None:
+            while True:
+                live.refresh()
+                await asyncio.sleep(0.25)
+
+        ticker = asyncio.create_task(tick())
+        try:
+            reports = await runner.run(issue_id, force=force, on_progress=display.handle)
+        finally:
+            ticker.cancel()
+            await asyncio.gather(ticker, return_exceptions=True)
+            live.refresh()
+    return reports
 
 
 def _print_summary(reports: list[RunReport]) -> None:
     if not reports:
         typer.echo("No matching workflows.")
         return
-    typer.echo(f"{'WORKFLOW':<32} {'ACTION':<32} {'STATE':<10} NOTE")
+    typer.echo(f"{'WORKFLOW':<28} {'ACTION':<28} {'STATE':<8} {'TIME':>8}  NOTE")
     for report in reports:
         for result in report.action_results:
             typer.echo(_format_row(report.workflow_name, result, hook=False))
@@ -95,4 +134,17 @@ def _format_row(workflow_name: str, result: ActionResult, *, hook: bool) -> str:
     if "\n" in full_note:
         note += " (see run report for full error)"
     label = f"{result.action_id} (hook)" if hook else result.action_id
-    return f"{workflow_name:<32} {label:<32} {state:<10} {note}"
+    time_col = _fmt_duration_ms(result.duration_ms)
+    return f"{workflow_name:<28} {label:<28} {state:<8} {time_col:>8}  {note}"
+
+
+def _fmt_duration_ms(ms: int | None) -> str:
+    if ms is None:
+        return ""
+    if ms < 1000:
+        return f"{ms}ms"
+    secs = ms / 1000
+    if secs < 60:
+        return f"{secs:.1f}s"
+    minutes, rem = divmod(int(secs), 60)
+    return f"{minutes}m{rem:02d}s"

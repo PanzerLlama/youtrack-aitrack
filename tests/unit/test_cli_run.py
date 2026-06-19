@@ -88,6 +88,7 @@ def test_run_writes_field_when_state_matches(respx_mock: respx.MockRouter, tmp_p
     assert "mark" in result.output
     assert "ok" in result.output
     assert "DONE" in result.output
+    assert "TIME" in result.output  # per-action wall-time column
 
 
 @respx.mock(base_url=BASE_URL, assert_all_called=False)

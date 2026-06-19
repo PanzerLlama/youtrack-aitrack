@@ -11,6 +11,7 @@ from pydantic import PrivateAttr
 from youtrack_aitrack.domain.action import ActionSpec
 from youtrack_aitrack.domain.context import Context
 from youtrack_aitrack.domain.event import IssueEvent
+from youtrack_aitrack.domain.progress import ProgressEvent
 from youtrack_aitrack.domain.run import ActionResult, RunState
 from youtrack_aitrack.domain.triggers.manual import ManualTrigger
 from youtrack_aitrack.domain.triggers.status_change import StatusChangeTrigger
@@ -631,3 +632,66 @@ def test_build_idempotency_key_is_deterministic() -> None:
         workflow_name="w", issue_id="DEMO-1", to_state="Ready", commit_sha="def"
     )
     assert k1 != k3
+
+
+# --- progress callbacks ---
+
+
+async def test_dispatch_emits_progress_and_stamps_duration() -> None:
+    events: list[ProgressEvent] = []
+    parent = _FakeAction(id="parent")
+    child = _FakeAction(id="child", depends_on=["parent"])
+    wf = _wf(actions=[parent, child])
+
+    [report] = await WorkflowEngine().dispatch(_manual_event(), [wf], on_progress=events.append)
+
+    assert [e.action_id for e in events if e.phase == "queued"] == ["parent", "child"]
+    run_phases = [(e.action_id, e.phase) for e in events if e.phase in ("started", "finished")]
+    assert run_phases == [
+        ("parent", "started"),
+        ("parent", "finished"),
+        ("child", "started"),
+        ("child", "finished"),
+    ]
+    finished = {e.action_id: e for e in events if e.phase == "finished"}
+    assert finished["parent"].outcome == "ok"
+    assert all(e.workflow_name == "wf" for e in events)
+    assert all(r.duration_ms is not None for r in report.action_results)
+
+
+async def test_progress_marks_skipped_action_finished() -> None:
+    events: list[ProgressEvent] = []
+    a = _FakeAction(id="a", inputs=["git_diff"])
+    wf = _wf(actions=[a])
+
+    [report] = await WorkflowEngine().dispatch(
+        _manual_event(), [wf], unavailable_inputs={"git_diff"}, on_progress=events.append
+    )
+
+    finished = [e for e in events if e.phase == "finished"]
+    assert len(finished) == 1
+    assert finished[0].outcome == "skipped"
+    assert finished[0].duration_ms == 0
+    assert not any(e.phase == "started" for e in events)
+    assert report.action_results[0].skipped
+
+
+async def test_progress_includes_hooks() -> None:
+    events: list[ProgressEvent] = []
+    a = _FakeAction(id="a")
+    hook = _FakeAction(id="notify")
+    wf = _wf(actions=[a], on_success=[hook])
+
+    await WorkflowEngine().dispatch(_manual_event(), [wf], on_progress=events.append)
+
+    hook_events = [e for e in events if e.is_hook]
+    assert {e.phase for e in hook_events} == {"queued", "started", "finished"}
+    assert all(e.action_id == "notify" for e in hook_events)
+
+
+async def test_dispatch_without_callback_still_runs() -> None:
+    a = _FakeAction(id="a")
+    wf = _wf(actions=[a])
+    [report] = await WorkflowEngine().dispatch(_manual_event(), [wf])
+    assert report.state is RunState.DONE
+    assert report.action_results[0].duration_ms is not None

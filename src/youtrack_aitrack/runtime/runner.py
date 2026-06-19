@@ -19,6 +19,7 @@ from youtrack_aitrack.config.loader import load_workflow
 from youtrack_aitrack.domain.agent_runner import AgentRunner
 from youtrack_aitrack.domain.event import IssueEvent
 from youtrack_aitrack.domain.inputs import GitDiffProvider
+from youtrack_aitrack.domain.progress import ProgressCallback
 from youtrack_aitrack.domain.run import RunReport
 from youtrack_aitrack.domain.workflow import Workflow
 from youtrack_aitrack.engine import WorkflowEngine
@@ -76,7 +77,13 @@ class Runner:
         self._run_store = run_store
         self._state = state_lookup
 
-    async def dispatch(self, event: IssueEvent, *, force: bool = False) -> list[RunReport]:
+    async def dispatch(
+        self,
+        event: IssueEvent,
+        *,
+        force: bool = False,
+        on_progress: ProgressCallback | None = None,
+    ) -> list[RunReport]:
         branch, diff, commit_sha, unavailable = self._resolve_repo_state(event.issue_id)
         reports = await self._engine.dispatch(
             event,
@@ -88,12 +95,19 @@ class Runner:
             base_url=self._config.defaults.base_url,
             repo_path=self._repo_dir,
             force=force,
+            on_progress=on_progress,
         )
         for report in reports:
             self._run_store.save_run(report)
         return reports
 
-    async def run(self, issue_id: str, *, force: bool = False) -> list[RunReport]:
+    async def run(
+        self,
+        issue_id: str,
+        *,
+        force: bool = False,
+        on_progress: ProgressCallback | None = None,
+    ) -> list[RunReport]:
         current_state = await self._state.get_issue_state(issue_id)
         event = IssueEvent(
             issue_id=issue_id,
@@ -103,7 +117,7 @@ class Runner:
             to_state=current_state,
             timestamp=datetime.now(UTC),
         )
-        return await self.dispatch(event, force=force)
+        return await self.dispatch(event, force=force, on_progress=on_progress)
 
     def _resolve_repo_state(
         self, issue_id: str

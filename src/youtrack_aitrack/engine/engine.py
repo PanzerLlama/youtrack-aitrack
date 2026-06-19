@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import time
 from pathlib import Path
 from typing import cast
 
@@ -10,6 +11,12 @@ from youtrack_aitrack.domain.action import Action, ActionSpec
 from youtrack_aitrack.domain.context import Context
 from youtrack_aitrack.domain.event import IssueEvent
 from youtrack_aitrack.domain.output import OutputSink
+from youtrack_aitrack.domain.progress import (
+    ActionOutcome,
+    ProgressCallback,
+    ProgressEvent,
+    ProgressPhase,
+)
 from youtrack_aitrack.domain.run import ActionResult, RunReport, RunState
 from youtrack_aitrack.domain.trigger import Trigger
 from youtrack_aitrack.domain.workflow import Workflow
@@ -38,6 +45,7 @@ class WorkflowEngine:
         base_url: str | None = None,
         repo_path: Path | None = None,
         force: bool = False,
+        on_progress: ProgressCallback | None = None,
     ) -> list[RunReport]:
         matched = [w for w in workflows if _trigger_matches(w, event)]
         if not matched:
@@ -61,6 +69,7 @@ class WorkflowEngine:
                         base_url=base_url,
                         commit_sha=commit_sha,
                         repo_path=repo_path,
+                        on_progress=on_progress,
                     )
                     for w, _ in scheduled
                 )
@@ -101,6 +110,7 @@ class WorkflowEngine:
         base_url: str | None = None,
         commit_sha: str | None = None,
         repo_path: Path | None = None,
+        on_progress: ProgressCallback | None = None,
     ) -> RunReport:
         outputs: dict[str, ActionResult] = {}
         failed = await _execute_graph(
@@ -108,11 +118,13 @@ class WorkflowEngine:
             event,
             outputs,
             unavailable_inputs or set(),
+            workflow_name=workflow.name,
             branch=branch,
             diff=diff,
             base_url=base_url,
             commit_sha=commit_sha,
             repo_path=repo_path,
+            on_progress=on_progress,
         )
         output_error: str | None = None
         if not failed and self._output_sink is not None:
@@ -124,11 +136,13 @@ class WorkflowEngine:
             hook_specs,
             event,
             outputs,
+            workflow_name=workflow.name,
             branch=branch,
             diff=diff,
             base_url=base_url,
             commit_sha=commit_sha,
             repo_path=repo_path,
+            on_progress=on_progress,
         )
         return RunReport(
             workflow_name=workflow.name,
@@ -148,13 +162,17 @@ async def _execute_graph(
     outputs: dict[str, ActionResult],
     unavailable_inputs: set[str],
     *,
+    workflow_name: str,
     branch: str | None,
     diff: str | None,
     base_url: str | None,
     commit_sha: str | None,
     repo_path: Path | None,
+    on_progress: ProgressCallback | None,
 ) -> bool:
     by_id = {a.id: a for a in specs}
+    for spec in specs:
+        _emit(on_progress, workflow_name, spec.id, "queued")
     remaining = set(by_id)
     failed = False
     while remaining and not failed:
@@ -168,8 +186,9 @@ async def _execute_graph(
             skip = _skip_reason(by_id[aid], outputs, unavailable_inputs)
             if skip is not None:
                 outputs[aid] = ActionResult(
-                    action_id=aid, success=True, skipped=True, skip_reason=skip
+                    action_id=aid, success=True, skipped=True, skip_reason=skip, duration_ms=0
                 )
+                _emit(on_progress, workflow_name, aid, "finished", outcome="skipped", duration_ms=0)
                 remaining.discard(aid)
             else:
                 to_run.append(aid)
@@ -185,13 +204,15 @@ async def _execute_graph(
             action_outputs=dict(outputs),
         )
         results = await asyncio.gather(
-            *(_run_one(by_id[aid], ctx) for aid in to_run),
-            return_exceptions=True,
+            *(
+                _run_timed(by_id[aid], ctx, workflow_name=workflow_name, on_progress=on_progress)
+                for aid in to_run
+            )
         )
         for aid, res in zip(to_run, results, strict=True):
-            outputs[aid] = _coerce_result(aid, res)
+            outputs[aid] = res
             remaining.discard(aid)
-            if not outputs[aid].success and not outputs[aid].skipped:
+            if not res.success and not res.skipped:
                 failed = True
     return failed
 
@@ -215,14 +236,18 @@ async def _execute_hooks(
     event: IssueEvent,
     outputs: dict[str, ActionResult],
     *,
+    workflow_name: str,
     branch: str | None,
     diff: str | None,
     base_url: str | None,
     commit_sha: str | None,
     repo_path: Path | None,
+    on_progress: ProgressCallback | None,
 ) -> list[ActionResult]:
     if not specs:
         return []
+    for spec in specs:
+        _emit(on_progress, workflow_name, spec.id, "queued", is_hook=True)
     ctx = Context(
         issue=event,
         branch=branch,
@@ -232,22 +257,80 @@ async def _execute_hooks(
         repo_path=repo_path,
         action_outputs=dict(outputs),
     )
-    results = await asyncio.gather(
-        *(_run_one(a, ctx) for a in specs),
-        return_exceptions=True,
+    return list(
+        await asyncio.gather(
+            *(
+                _run_timed(
+                    a, ctx, workflow_name=workflow_name, is_hook=True, on_progress=on_progress
+                )
+                for a in specs
+            )
+        )
     )
-    return [_coerce_result(a.id, r) for a, r in zip(specs, results, strict=True)]
 
 
-async def _run_one(spec: ActionSpec, ctx: Context) -> ActionResult:
-    action = cast(Action, spec)
-    return await action.execute(ctx)
+async def _run_timed(
+    spec: ActionSpec,
+    ctx: Context,
+    *,
+    workflow_name: str,
+    is_hook: bool = False,
+    on_progress: ProgressCallback | None,
+) -> ActionResult:
+    """Time one action, stamp ``duration_ms``, and emit start/finish progress.
+
+    Any exception escaping ``execute`` is coerced to a failed ActionResult,
+    preserving the previous ``gather(return_exceptions=True)`` behaviour while
+    keeping cancellation propagating.
+    """
+    _emit(on_progress, workflow_name, spec.id, "started", is_hook=is_hook)
+    started = time.monotonic()
+    try:
+        result = await cast(Action, spec).execute(ctx)
+    except Exception as exc:  # surface as a failed action, never crash the run
+        result = ActionResult(action_id=spec.id, success=False, error=str(exc))
+    duration_ms = int((time.monotonic() - started) * 1000)
+    result = result.model_copy(update={"duration_ms": duration_ms})
+    _emit(
+        on_progress,
+        workflow_name,
+        spec.id,
+        "finished",
+        is_hook=is_hook,
+        outcome=_outcome(result),
+        duration_ms=duration_ms,
+    )
+    return result
 
 
-def _coerce_result(action_id: str, res: ActionResult | BaseException) -> ActionResult:
-    if isinstance(res, BaseException):
-        return ActionResult(action_id=action_id, success=False, error=str(res))
-    return res
+def _outcome(result: ActionResult) -> ActionOutcome:
+    if result.skipped:
+        return "skipped"
+    return "ok" if result.success else "fail"
+
+
+def _emit(
+    on_progress: ProgressCallback | None,
+    workflow_name: str,
+    action_id: str,
+    phase: ProgressPhase,
+    *,
+    is_hook: bool = False,
+    outcome: ActionOutcome | None = None,
+    duration_ms: int | None = None,
+) -> None:
+    if on_progress is None:
+        return
+    on_progress(
+        ProgressEvent(
+            workflow_name=workflow_name,
+            action_id=action_id,
+            phase=phase,
+            is_hook=is_hook,
+            outcome=outcome,
+            duration_ms=duration_ms,
+        )
+    )
 
 
 async def _write_outputs(

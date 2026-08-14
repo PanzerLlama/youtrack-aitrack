@@ -121,22 +121,31 @@ class Runner:
 
     def _resolve_repo_state(
         self, issue_id: str
-    ) -> tuple[str | None, str | None, str | None, set[str]]:
+    ) -> tuple[str | None, str | None, str | None, dict[str, str]]:
         pattern = self._config.defaults.branch_pattern
+        base = self._config.defaults.git_base_branch
         try:
             branch = self._git.resolve_branch(issue_id, repo_dir=self._repo_dir, pattern=pattern)
-        except GitDiffError:
-            return None, None, None, {"git_diff"}
+        except GitDiffError as exc:
+            return None, None, None, _no_diff(_first_line(str(exc)))
         if branch is None:
-            return None, None, None, {"git_diff"}
+            glob = pattern.replace("{task_id}", issue_id)
+            return None, None, None, _no_diff(f"no branch matching {glob!r} in {self._repo_dir}")
         try:
-            diff = self._git.diff(
-                self._repo_dir, branch, base=self._config.defaults.git_base_branch
-            )
+            diff = self._git.diff(self._repo_dir, branch, base=base)
             commit_sha = self._git.commit_sha(self._repo_dir, branch)
-        except GitDiffError:
-            return branch, None, None, {"git_diff"}
-        return branch, diff, commit_sha, set()
+        except GitDiffError as exc:
+            reason = f"diff against base {base!r} failed: {_first_line(str(exc))}"
+            return branch, None, None, _no_diff(reason)
+        return branch, diff, commit_sha, {}
+
+
+def _no_diff(reason: str) -> dict[str, str]:
+    return {"git_diff": reason}
+
+
+def _first_line(message: str) -> str:
+    return message.strip().splitlines()[0] if message.strip() else message
 
 
 def wire(

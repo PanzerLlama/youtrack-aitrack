@@ -260,7 +260,7 @@ async def test_unavailable_input_skips_dependent_action() -> None:
     wf = _wf(actions=[diff_dep, meta_only])
 
     [report] = await WorkflowEngine().dispatch(
-        _manual_event(), [wf], unavailable_inputs={"git_diff"}
+        _manual_event(), [wf], unavailable_inputs={"git_diff": "no branch matching 'EL-1-*'"}
     )
 
     assert report.state is RunState.DONE
@@ -282,7 +282,7 @@ async def test_all_diff_dependent_workflow_completes_cleanly() -> None:
     wf = _wf(actions=[a, b], on_success=[success_hook], on_failure=[fail_hook])
 
     [report] = await WorkflowEngine().dispatch(
-        _manual_event(), [wf], unavailable_inputs={"git_diff"}
+        _manual_event(), [wf], unavailable_inputs={"git_diff": "no branch matching 'EL-1-*'"}
     )
 
     assert report.state is RunState.DONE
@@ -297,7 +297,7 @@ async def test_skipped_parent_cascades_to_dependent() -> None:
     wf = _wf(actions=[parent, child])
 
     [report] = await WorkflowEngine().dispatch(
-        _manual_event(), [wf], unavailable_inputs={"git_diff"}
+        _manual_event(), [wf], unavailable_inputs={"git_diff": "no branch matching 'EL-1-*'"}
     )
 
     assert report.state is RunState.DONE
@@ -307,6 +307,44 @@ async def test_skipped_parent_cascades_to_dependent() -> None:
     assert by_id["child"].skip_reason is not None
     assert "parent" in by_id["child"].skip_reason
     assert cast(_FakeAction, child).calls == []
+
+
+async def test_skip_reason_carries_why_the_input_is_unavailable() -> None:
+    a = _FakeAction(id="a", inputs=["git_diff"])
+    wf = _wf(actions=[a])
+
+    [report] = await WorkflowEngine().dispatch(
+        _manual_event(), [wf], unavailable_inputs={"git_diff": "diff against base 'dev' failed"}
+    )
+
+    reason = report.action_results[0].skip_reason
+    assert reason is not None
+    assert reason == "missing inputs: ['git_diff'] — diff against base 'dev' failed"
+
+
+async def test_skip_reason_omits_detail_when_reason_is_blank() -> None:
+    a = _FakeAction(id="a", inputs=["git_diff"])
+    wf = _wf(actions=[a])
+
+    [report] = await WorkflowEngine().dispatch(
+        _manual_event(), [wf], unavailable_inputs={"git_diff": ""}
+    )
+
+    assert report.action_results[0].skip_reason == "missing inputs: ['git_diff']"
+
+
+async def test_skip_reason_dedupes_identical_reasons_across_inputs() -> None:
+    a = _FakeAction(id="a", inputs=["git_diff", "route_index"])
+    wf = _wf(actions=[a])
+
+    [report] = await WorkflowEngine().dispatch(
+        _manual_event(),
+        [wf],
+        unavailable_inputs={"git_diff": "no branch matched", "route_index": "no branch matched"},
+    )
+
+    reason = report.action_results[0].skip_reason
+    assert reason == "missing inputs: ['git_diff', 'route_index'] — no branch matched"
 
 
 async def test_unavailable_inputs_none_runs_normally() -> None:
@@ -665,7 +703,10 @@ async def test_progress_marks_skipped_action_finished() -> None:
     wf = _wf(actions=[a])
 
     [report] = await WorkflowEngine().dispatch(
-        _manual_event(), [wf], unavailable_inputs={"git_diff"}, on_progress=events.append
+        _manual_event(),
+        [wf],
+        unavailable_inputs={"git_diff": "no branch matching 'EL-1-*'"},
+        on_progress=events.append,
     )
 
     finished = [e for e in events if e.phase == "finished"]

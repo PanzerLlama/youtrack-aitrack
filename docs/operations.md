@@ -173,7 +173,8 @@ Symptoms we've seen in practice and what causes them:
 | Symptom | Likely cause | Fix |
 |---|---|---|
 | `No matching workflows.` | Issue isn't in the configured `to_state`; or workflow YAML wasn't loaded; or no YAML files in `<config-dir>/workflows/` | Check `yta workflows list`; check issue state in YouTrack matches workflow trigger |
-| All actions `skipped` with `missing inputs: ['git_diff']` | Branch couldn't be resolved (no matching branch) or diff failed (wrong base branch) | Run `git branch --list '<task-id>-*'` to confirm; set `defaults.git_base_branch` to your repo's actual default |
+| All actions `skipped` with `missing inputs: ['git_diff'] — no branch matching '<task-id>-*' in <path>` | No branch matches `branch_pattern` in that repo — often `yta run` was launched from the wrong directory | Run `git branch --list '<task-id>-*'` there; pass `--repo-dir=PATH` or `cd` to the right repo |
+| All actions `skipped` with `missing inputs: ['git_diff'] — diff against base 'X' failed: ...` | `defaults.git_base_branch` names a branch that doesn't exist in the repo (or the diff itself failed) | Set `defaults.git_base_branch` to the branch your feature branches fork from |
 | `YouTrackError: custom field not found in project 'X': 'Y'` | The field doesn't exist on the project | Create it in YouTrack admin and attach to the project |
 | `YouTrackError: unsupported custom field type 'EnumProjectCustomField'` | Field is the wrong type | v1 supports only `Simple` (string) and `Text` — recreate with one of those types |
 | `GitDiffError: ambiguous branch match` | Multiple branches match the pattern | Delete stale branches or tighten `branch_pattern` |

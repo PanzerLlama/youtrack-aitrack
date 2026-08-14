@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import time
+from collections.abc import Mapping
 from pathlib import Path
 from typing import cast
 
@@ -38,7 +39,7 @@ class WorkflowEngine:
         event: IssueEvent,
         workflows: list[Workflow],
         *,
-        unavailable_inputs: set[str] | None = None,
+        unavailable_inputs: Mapping[str, str] | None = None,
         commit_sha: str | None = None,
         branch: str | None = None,
         diff: str | None = None,
@@ -104,7 +105,7 @@ class WorkflowEngine:
         workflow: Workflow,
         event: IssueEvent,
         *,
-        unavailable_inputs: set[str] | None = None,
+        unavailable_inputs: Mapping[str, str] | None = None,
         branch: str | None = None,
         diff: str | None = None,
         base_url: str | None = None,
@@ -117,7 +118,7 @@ class WorkflowEngine:
             workflow.actions,
             event,
             outputs,
-            unavailable_inputs or set(),
+            unavailable_inputs or {},
             workflow_name=workflow.name,
             branch=branch,
             diff=diff,
@@ -160,7 +161,7 @@ async def _execute_graph(
     specs: list[ActionSpec],
     event: IssueEvent,
     outputs: dict[str, ActionResult],
-    unavailable_inputs: set[str],
+    unavailable_inputs: Mapping[str, str],
     *,
     workflow_name: str,
     branch: str | None,
@@ -220,15 +221,25 @@ async def _execute_graph(
 def _skip_reason(
     spec: ActionSpec,
     outputs: dict[str, ActionResult],
-    unavailable_inputs: set[str],
+    unavailable_inputs: Mapping[str, str],
 ) -> str | None:
-    missing = [i for i in spec.inputs if i in unavailable_inputs]
+    missing = sorted({i for i in spec.inputs if i in unavailable_inputs})
     if missing:
-        return f"missing inputs: {sorted(missing)}"
+        why = _dedup([unavailable_inputs[i] for i in missing if unavailable_inputs[i]])
+        detail = f" — {'; '.join(why)}" if why else ""
+        return f"missing inputs: {missing}{detail}"
     skipped_parents = [d for d in spec.depends_on if outputs[d].skipped]
     if skipped_parents:
         return f"depends_on skipped: {sorted(skipped_parents)}"
     return None
+
+
+def _dedup(reasons: list[str]) -> list[str]:
+    seen: list[str] = []
+    for reason in reasons:
+        if reason not in seen:
+            seen.append(reason)
+    return seen
 
 
 async def _execute_hooks(

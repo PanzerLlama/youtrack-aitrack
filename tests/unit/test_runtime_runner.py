@@ -244,6 +244,8 @@ async def test_dispatch_no_branch_marks_git_diff_unavailable() -> None:
 
     assert report.state is RunState.DONE
     assert report.action_results[0].skipped is True
+    assert report.action_results[0].skip_reason is not None
+    assert "no branch matching 'DEMO-1-*'" in report.action_results[0].skip_reason
     assert llm.calls == []
     assert git.diff_calls == []
     assert git.sha_calls == []
@@ -261,6 +263,8 @@ async def test_dispatch_resolve_branch_error_marks_unavailable() -> None:
     [report] = await runner.dispatch(_manual_event())
 
     assert report.action_results[0].skipped is True
+    assert report.action_results[0].skip_reason is not None
+    assert "boom" in report.action_results[0].skip_reason
     assert llm.calls == []
 
 
@@ -271,12 +275,31 @@ async def test_dispatch_diff_error_after_branch_resolved_still_skips() -> None:
         trigger=ManualTrigger(),
         actions=[AiReportAction(id="a", inputs=["git_diff"], prompt="p.md", model="m")],
     )
-    runner, llm, _, _, _ = _build(git=git, workflow=wf)
+    runner, llm, _, _, _ = _build(git=git, workflow=wf, git_base_branch="develop")
 
     [report] = await runner.dispatch(_manual_event())
 
     assert report.action_results[0].skipped is True
+    reason = report.action_results[0].skip_reason
+    assert reason is not None
+    assert "diff against base 'develop' failed" in reason
+    assert "boom" in reason
     assert llm.calls == []
+
+
+async def test_skip_reasons_distinguish_missing_branch_from_diff_failure() -> None:
+    wf = Workflow(
+        name="audit",
+        trigger=ManualTrigger(),
+        actions=[AiReportAction(id="a", inputs=["git_diff"], prompt="p.md", model="m")],
+    )
+    no_branch, *_ = _build(git=_FakeGit(branch=None), workflow=wf)
+    bad_base, *_ = _build(git=_FakeGit(diff_error=True), workflow=wf)
+
+    [missing] = await no_branch.dispatch(_manual_event())
+    [failed] = await bad_base.dispatch(_manual_event())
+
+    assert missing.action_results[0].skip_reason != failed.action_results[0].skip_reason
 
 
 async def test_run_fabricates_status_change_event_from_current_state() -> None:
@@ -484,11 +507,12 @@ def test_resolve_repo_state_empty_branch_marks_unavailable(branch: str | None) -
         ),
     )
     b, d, sha, unavailable = cast(
-        tuple[str | None, str | None, str | None, set[str]],
+        tuple[str | None, str | None, str | None, dict[str, str]],
         runner._resolve_repo_state("DEMO-1"),
     )
     assert b is None and d is None and sha is None
-    assert unavailable == {"git_diff"}
+    assert list(unavailable) == ["git_diff"]
+    assert "DEMO-1-*" in unavailable["git_diff"]
 
 
 # --- _build_cli_runner — cli_agent_mode wiring ---

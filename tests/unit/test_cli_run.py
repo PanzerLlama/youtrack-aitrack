@@ -285,3 +285,131 @@ def test_run_without_workflow_flag_still_gates_on_trigger(
 
     assert result.exit_code == 0, result.output
     assert "No matching workflows." in result.output
+
+
+BRANCH_WORKFLOW = """\
+name: branch-plan
+trigger:
+  type: manual
+actions:
+  - id: create_branch
+    type: git_branch
+    inputs: [task_meta]
+  - id: plan
+    type: ai_report
+    depends_on: [create_branch]
+    mode: plan
+    prompt: smoke.md
+    model: claude-sonnet-4-6
+  - id: save_plan
+    type: write_file
+    depends_on: [plan]
+    source: plan
+    path: "docs/plans/{task_id}.md"
+    commit_message: "docs: plan for {task_id}"
+"""
+
+
+def _git(args: list[str], cwd: Path) -> str:
+    import subprocess
+
+    return subprocess.run(
+        ["git", *args], cwd=cwd, check=True, capture_output=True, text=True
+    ).stdout.strip()
+
+
+def _init_repo(repo: Path) -> None:
+    repo.mkdir()
+    _git(["init", "-b", "main"], repo)
+    _git(["config", "user.email", "t@example.com"], repo)
+    _git(["config", "user.name", "Test"], repo)
+    _git(["config", "commit.gpgsign", "false"], repo)
+    (repo / "README").write_text("init\n")
+    _git(["add", "."], repo)
+    _git(["commit", "-m", "init"], repo)
+
+
+def _mock_issue(respx_mock: respx.MockRouter, issue: str, summary: str, state: str) -> None:
+    respx_mock.get(f"/api/issues/{issue}").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "summary": summary,
+                "description": "Users need CSV.",
+                "customFields": [{"name": STATE_FIELD_NAME, "value": {"name": state}}],
+            },
+        )
+    )
+
+
+@respx.mock(base_url=BASE_URL, assert_all_called=False)
+def test_run_branch_workflow_creates_branch_and_commits_plan(
+    respx_mock: respx.MockRouter, tmp_path: Path
+) -> None:
+    cfg = _make_config(tmp_path)
+    _write_workflow(cfg, "branch.yaml", BRANCH_WORKFLOW)
+    _write_prompt(cfg, "smoke.md", SMOKE_PROMPT)
+    repo = tmp_path / "repo"
+    _init_repo(repo)
+    _mock_issue(respx_mock, "DEMO-1", "Add CSV export", "Development in progress")
+
+    result = runner.invoke(
+        app,
+        [
+            "--config-dir",
+            str(cfg),
+            "run",
+            "DEMO-1",
+            "--workflow",
+            "branch-plan",
+            "--repo-dir",
+            str(repo),
+            "--stub-llm",
+            "--show-output",
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert _git(["branch", "--show-current"], repo) == "DEMO-1-add-csv-export"
+    plan_file = repo / "docs" / "plans" / "DEMO-1.md"
+    assert plan_file.is_file()
+    assert "[STUB AGENT]" in plan_file.read_text()
+    assert _git(["log", "-1", "--pretty=%s"], repo) == "docs: plan for DEMO-1"
+    assert "created DEMO-1-add-csv-export from main" in result.output
+    assert "wrote docs/plans/DEMO-1.md; committed" in result.output
+    assert "--- branch-plan / plan" in result.output
+    assert "Mode: plan" in result.output
+
+
+@respx.mock(base_url=BASE_URL, assert_all_called=False)
+def test_run_branch_workflow_dry_run_touches_nothing(
+    respx_mock: respx.MockRouter, tmp_path: Path
+) -> None:
+    cfg = _make_config(tmp_path)
+    _write_workflow(cfg, "branch.yaml", BRANCH_WORKFLOW)
+    _write_prompt(cfg, "smoke.md", SMOKE_PROMPT)
+    repo = tmp_path / "repo"
+    _init_repo(repo)
+    _mock_issue(respx_mock, "DEMO-1", "Add CSV export", "Development in progress")
+
+    result = runner.invoke(
+        app,
+        [
+            "--config-dir",
+            str(cfg),
+            "run",
+            "DEMO-1",
+            "--workflow",
+            "branch-plan",
+            "--repo-dir",
+            str(repo),
+            "--stub-llm",
+            "--dry-run",
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert "DONE" in result.output
+    assert _git(["branch", "--show-current"], repo) == "main"
+    assert _git(["branch", "--list"], repo).split() == ["*", "main"]
+    assert not (repo / "docs").exists()

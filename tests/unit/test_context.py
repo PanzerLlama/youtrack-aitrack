@@ -53,3 +53,16 @@ def test_context_frozen() -> None:
     c = Context(issue=_event())
     with pytest.raises(ValidationError):
         c.branch = "renamed"
+
+
+def test_context_issue_details_default_none_and_frozen() -> None:
+    from youtrack_aitrack.domain.issue import IssueDetails
+
+    c = Context(issue=_event())
+    assert c.issue_details is None
+    details = IssueDetails(summary="Add export", description="CSV export", state="Open")
+    c2 = Context(issue=_event(), issue_details=details)
+    assert c2.issue_details is not None
+    assert c2.issue_details.summary == "Add export"
+    with pytest.raises(ValidationError):
+        details.summary = "x"  # type: ignore[misc]

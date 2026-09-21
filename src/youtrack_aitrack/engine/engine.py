@@ -11,6 +11,7 @@ from typing import cast
 from youtrack_aitrack.domain.action import Action, ActionSpec
 from youtrack_aitrack.domain.context import Context
 from youtrack_aitrack.domain.event import IssueEvent
+from youtrack_aitrack.domain.issue import IssueDetails
 from youtrack_aitrack.domain.output import OutputSink
 from youtrack_aitrack.domain.progress import (
     ActionOutcome,
@@ -45,6 +46,7 @@ class WorkflowEngine:
         diff: str | None = None,
         base_url: str | None = None,
         repo_path: Path | None = None,
+        issue_details: IssueDetails | None = None,
         force: bool = False,
         on_progress: ProgressCallback | None = None,
     ) -> list[RunReport]:
@@ -70,6 +72,7 @@ class WorkflowEngine:
                         base_url=base_url,
                         commit_sha=commit_sha,
                         repo_path=repo_path,
+                        issue_details=issue_details,
                         on_progress=on_progress,
                     )
                     for w, _ in scheduled
@@ -111,6 +114,7 @@ class WorkflowEngine:
         base_url: str | None = None,
         commit_sha: str | None = None,
         repo_path: Path | None = None,
+        issue_details: IssueDetails | None = None,
         on_progress: ProgressCallback | None = None,
     ) -> RunReport:
         outputs: dict[str, ActionResult] = {}
@@ -125,6 +129,7 @@ class WorkflowEngine:
             base_url=base_url,
             commit_sha=commit_sha,
             repo_path=repo_path,
+            issue_details=issue_details,
             on_progress=on_progress,
         )
         output_error: str | None = None
@@ -143,6 +148,7 @@ class WorkflowEngine:
             base_url=base_url,
             commit_sha=commit_sha,
             repo_path=repo_path,
+            issue_details=issue_details,
             on_progress=on_progress,
         )
         return RunReport(
@@ -169,6 +175,7 @@ async def _execute_graph(
     base_url: str | None,
     commit_sha: str | None,
     repo_path: Path | None,
+    issue_details: IssueDetails | None,
     on_progress: ProgressCallback | None,
 ) -> bool:
     by_id = {a.id: a for a in specs}
@@ -197,6 +204,7 @@ async def _execute_graph(
             continue
         ctx = Context(
             issue=event,
+            issue_details=issue_details,
             branch=branch,
             diff=diff,
             base_url=base_url,
@@ -253,6 +261,7 @@ async def _execute_hooks(
     base_url: str | None,
     commit_sha: str | None,
     repo_path: Path | None,
+    issue_details: IssueDetails | None,
     on_progress: ProgressCallback | None,
 ) -> list[ActionResult]:
     if not specs:
@@ -261,6 +270,7 @@ async def _execute_hooks(
         _emit(on_progress, workflow_name, spec.id, "queued", is_hook=True)
     ctx = Context(
         issue=event,
+        issue_details=issue_details,
         branch=branch,
         diff=diff,
         base_url=base_url,

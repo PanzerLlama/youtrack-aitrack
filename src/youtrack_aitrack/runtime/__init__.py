@@ -2,6 +2,7 @@
 
 from youtrack_aitrack.runtime.factory import (
     ActionFactory,
+    DryRunIssueTracker,
     NoOpBranchCreator,
     NoOpCommentPoster,
     NoOpFieldWriter,
@@ -25,6 +26,7 @@ from youtrack_aitrack.runtime.runner import (
 __all__ = [
     "ActionFactory",
     "ActivityFeed",
+    "DryRunIssueTracker",
     "IssueDetailsLookup",
     "IssueTagsLookup",
     "NoOpBranchCreator",

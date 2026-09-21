@@ -7,6 +7,7 @@ from pathlib import Path
 import httpx
 import pytest
 import respx
+from click.testing import Result
 from typer.testing import CliRunner
 
 from youtrack_aitrack.cli.init import scaffold
@@ -412,4 +413,124 @@ def test_run_branch_workflow_dry_run_touches_nothing(
     assert "DONE" in result.output
     assert _git(["branch", "--show-current"], repo) == "main"
     assert _git(["branch", "--list"], repo).split() == ["*", "main"]
+    assert not (repo / "docs").exists()
+
+
+BEADS_WORKFLOW = """\
+name: beads-plan
+trigger:
+  type: manual
+actions:
+  - id: plan
+    type: ai_report
+    mode: plan
+    prompt: smoke.md
+    model: claude-sonnet-4-6
+  - id: track_plan
+    type: bd_issue
+    depends_on: [plan]
+    source: plan
+    issue_type: feature
+    fallback_path: "docs/plans/{task_id}.md"
+    fallback_commit_message: "docs: plan for {task_id}"
+"""
+
+
+def _fake_bd_on_path(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    import os
+    import stat
+
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    log = tmp_path / "bd-args.log"
+    script = bin_dir / "bd"
+    script.write_text(
+        f'#!/usr/bin/env bash\nprintf "%s\\n" "$@" > "{log}"\ncat > "{tmp_path}/bd-body.log"\n'
+        'echo "demo-x1y2"\n'
+    )
+    script.chmod(script.stat().st_mode | stat.S_IXUSR)
+    monkeypatch.setenv("PATH", f"{bin_dir}{os.pathsep}{os.environ['PATH']}")
+    return log
+
+
+def _invoke_beads_workflow(cfg: Path, repo: Path, *extra: str) -> Result:
+    return runner.invoke(
+        app,
+        [
+            "--config-dir",
+            str(cfg),
+            "run",
+            "DEMO-1",
+            "--workflow",
+            "beads-plan",
+            "--repo-dir",
+            str(repo),
+            "--stub-llm",
+            *extra,
+        ],
+    )
+
+
+@respx.mock(base_url=BASE_URL, assert_all_called=False)
+def test_run_bd_issue_creates_beads_issue_when_workspace_present(
+    respx_mock: respx.MockRouter, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    cfg = _make_config(tmp_path)
+    _write_workflow(cfg, "beads.yaml", BEADS_WORKFLOW)
+    _write_prompt(cfg, "smoke.md", SMOKE_PROMPT)
+    repo = tmp_path / "repo"
+    _init_repo(repo)
+    (repo / ".beads").mkdir()
+    log = _fake_bd_on_path(tmp_path, monkeypatch)
+    _mock_issue(respx_mock, "DEMO-1", "Add CSV export", "Development in progress")
+
+    result = _invoke_beads_workflow(cfg, repo)
+
+    assert result.exit_code == 0, result.output
+    args = log.read_text().splitlines()
+    assert args[args.index("--title") + 1] == "DEMO-1: Add CSV export"
+    assert args[args.index("--type") + 1] == "feature"
+    assert args[args.index("--external-ref") + 1] == "DEMO-1"
+    assert "[STUB AGENT]" in (tmp_path / "bd-body.log").read_text()
+    assert "created beads issue demo-x1y2" in result.output
+    assert not (repo / "docs").exists()
+
+
+@respx.mock(base_url=BASE_URL, assert_all_called=False)
+def test_run_bd_issue_falls_back_to_file_without_beads(
+    respx_mock: respx.MockRouter, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    cfg = _make_config(tmp_path)
+    _write_workflow(cfg, "beads.yaml", BEADS_WORKFLOW)
+    _write_prompt(cfg, "smoke.md", SMOKE_PROMPT)
+    repo = tmp_path / "repo"
+    _init_repo(repo)  # no .beads/ -> unavailable even if bd is on PATH
+    _mock_issue(respx_mock, "DEMO-1", "Add CSV export", "Development in progress")
+
+    result = _invoke_beads_workflow(cfg, repo)
+
+    assert result.exit_code == 0, result.output
+    assert (repo / "docs" / "plans" / "DEMO-1.md").is_file()
+    assert _git(["log", "-1", "--pretty=%s"], repo) == "docs: plan for DEMO-1"
+    assert "beads unavailable; wrote docs/plans/DEMO-1.md" in result.output
+
+
+@respx.mock(base_url=BASE_URL, assert_all_called=False)
+def test_run_bd_issue_dry_run_creates_nothing(
+    respx_mock: respx.MockRouter, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    cfg = _make_config(tmp_path)
+    _write_workflow(cfg, "beads.yaml", BEADS_WORKFLOW)
+    _write_prompt(cfg, "smoke.md", SMOKE_PROMPT)
+    repo = tmp_path / "repo"
+    _init_repo(repo)
+    (repo / ".beads").mkdir()
+    log = _fake_bd_on_path(tmp_path, monkeypatch)
+    _mock_issue(respx_mock, "DEMO-1", "Add CSV export", "Development in progress")
+
+    result = _invoke_beads_workflow(cfg, repo, "--dry-run")
+
+    assert result.exit_code == 0, result.output
+    assert not log.exists()
+    assert "created beads issue dry-run" in result.output
     assert not (repo / "docs").exists()

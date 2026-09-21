@@ -7,11 +7,12 @@ description: |
 
   It creates the feature branch <issue-id>-<slug-of-summary> from the base
   branch and switches to it, runs the agent in read-only plan mode against
-  the issue summary + description, posts the resulting plan as a comment on
-  the issue, and commits it to docs/plans/<issue-id>.md on the new branch.
-  Review the plan in YouTrack or on the branch, then continue the discussion
-  in an interactive `claude` session on that branch. Re-run with --force
-  after editing the issue to regenerate the plan.
+  the issue summary + description, and posts the resulting plan as a comment
+  on the issue. The plan is then persisted in the project: as a beads issue
+  (bd create, external-ref = the YouTrack id) when the repo uses beads, or
+  else committed to docs/plans/<issue-id>.md on the new branch. Review the
+  plan, then continue the discussion in an interactive `claude` session on
+  that branch. Re-run with --force after editing the issue to regenerate.
 
 trigger:
   type: manual
@@ -33,9 +34,13 @@ actions:
     prompt: implementation_plan.md
     model: claude-sonnet-4-6
 
-  - id: save_plan
-    type: write_file
+  - id: track_plan
+    type: bd_issue
     depends_on: [implementation_plan]
     source: implementation_plan
-    path: "docs/plans/{task_id}.md"
-    commit_message: "docs: implementation plan for {task_id}"
+    title: "{task_id}: {summary}"
+    issue_type: feature
+    priority: 2
+    # Used only when the repo has no beads (bd on PATH + .beads/):
+    fallback_path: "docs/plans/{task_id}.md"
+    fallback_commit_message: "docs: implementation plan for {task_id}"

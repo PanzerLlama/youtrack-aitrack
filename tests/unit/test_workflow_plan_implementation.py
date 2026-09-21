@@ -11,8 +11,8 @@ from youtrack_aitrack.cli.init import scaffold
 from youtrack_aitrack.cli.main import app
 from youtrack_aitrack.config import load_workflow
 from youtrack_aitrack.domain.actions.ai_report import AiReportAction
+from youtrack_aitrack.domain.actions.bd_issue import BdIssueAction
 from youtrack_aitrack.domain.actions.git_branch import GitBranchAction
-from youtrack_aitrack.domain.actions.write_file import WriteFileAction
 from youtrack_aitrack.domain.output import CommentOutput
 from youtrack_aitrack.domain.triggers.manual import ManualTrigger
 
@@ -32,13 +32,13 @@ def test_trigger_is_manual() -> None:
 
 def test_action_chain_branch_then_plan_then_save() -> None:
     wf = load_workflow(_WORKFLOW_PATH, env={})
-    assert [a.id for a in wf.actions] == ["create_branch", "implementation_plan", "save_plan"]
-    branch, plan, save = wf.actions
+    assert [a.id for a in wf.actions] == ["create_branch", "implementation_plan", "track_plan"]
+    branch, plan, track = wf.actions
     assert isinstance(branch, GitBranchAction)
     assert isinstance(plan, AiReportAction)
-    assert isinstance(save, WriteFileAction)
+    assert isinstance(track, BdIssueAction)
     assert plan.depends_on == ["create_branch"]
-    assert save.depends_on == ["implementation_plan"]
+    assert track.depends_on == ["implementation_plan"]
 
 
 def test_branch_uses_default_template_and_base_from_config() -> None:
@@ -60,13 +60,16 @@ def test_plan_runs_in_plan_mode_and_posts_a_comment() -> None:
     assert (_PROMPTS_DIR / plan.prompt).is_file()
 
 
-def test_save_plan_commits_under_docs_plans() -> None:
+def test_track_plan_uses_beads_with_file_fallback() -> None:
     wf = load_workflow(_WORKFLOW_PATH, env={})
-    save = wf.actions[2]
-    assert isinstance(save, WriteFileAction)
-    assert save.source == "implementation_plan"
-    assert save.path == "docs/plans/{task_id}.md"
-    assert save.commit_message == "docs: implementation plan for {task_id}"
+    track = wf.actions[2]
+    assert isinstance(track, BdIssueAction)
+    assert track.source == "implementation_plan"
+    assert track.title == "{task_id}: {summary}"
+    assert track.issue_type == "feature"
+    assert track.external_ref == "{task_id}"
+    assert track.fallback_path == "docs/plans/{task_id}.md"
+    assert track.fallback_commit_message == "docs: implementation plan for {task_id}"
 
 
 def test_yta_workflows_validate_exits_clean(

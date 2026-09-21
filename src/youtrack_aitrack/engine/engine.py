@@ -48,9 +48,16 @@ class WorkflowEngine:
         repo_path: Path | None = None,
         issue_details: IssueDetails | None = None,
         force: bool = False,
+        match_triggers: bool = True,
         on_progress: ProgressCallback | None = None,
     ) -> list[RunReport]:
-        matched = [w for w in workflows if _trigger_matches(w, event)]
+        """Run every workflow whose trigger matches *event*.
+
+        ``match_triggers=False`` runs all given workflows regardless of trigger —
+        the explicit-selection path (``yta run --workflow=NAME``) where the caller
+        has already named the one workflow it wants. Idempotency still applies.
+        """
+        matched = [w for w in workflows if not match_triggers or _trigger_matches(w, event)]
         if not matched:
             return []
         scheduled = [

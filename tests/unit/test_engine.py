@@ -763,3 +763,18 @@ async def test_run_threads_issue_details_into_context() -> None:
     assert report.state is RunState.DONE
     assert len(seen) == 2
     assert all(c.issue_details == details for c in seen)
+
+
+async def test_dispatch_match_triggers_false_runs_non_matching_workflow() -> None:
+    wf = Workflow(
+        name="manual-only",
+        trigger=ManualTrigger(),
+        actions=[_FakeAction(id="a")],
+    )
+    engine = WorkflowEngine()
+
+    gated = await engine.dispatch(_status_change_event(), [wf])
+    bypassed = await engine.dispatch(_status_change_event(), [wf], match_triggers=False)
+
+    assert gated == []
+    assert [r.workflow_name for r in bypassed] == ["manual-only"]

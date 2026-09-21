@@ -47,20 +47,31 @@ class _NoOpBranchCreator:
 class GitBranchAction(ActionSpec):
     """Idempotent: an existing branch is switched to, a missing one is created from ``base``.
 
+    ``base`` unset means "the instance's configured base branch", injected by the
+    runtime as ``default_base`` (falls back to ``main``).
+
     Switching requires a clean tracked tree so a checkout never clobbers local
     edits; being already on the target branch needs no switch and is always fine.
     """
 
     type: Literal["git_branch"] = "git_branch"
-    base: str = "main"
+    base: str | None = None
     name: str = DEFAULT_BRANCH_TEMPLATE
     checkout: bool = True
 
     _git: BranchCreator = PrivateAttr()
+    _default_base: str = PrivateAttr()
 
-    def __init__(self, *, git: BranchCreator | None = None, **data: Any) -> None:
+    def __init__(
+        self,
+        *,
+        git: BranchCreator | None = None,
+        default_base: str = "main",
+        **data: Any,
+    ) -> None:
         super().__init__(**data)
         self._git = git if git is not None else _NoOpBranchCreator()
+        self._default_base = default_base
 
     async def execute(self, ctx: Context) -> ActionResult:
         repo = ctx.repo_path if ctx.repo_path is not None else Path(".")
@@ -69,6 +80,7 @@ class GitBranchAction(ActionSpec):
             branch = build_branch_name(self.name, task_id=ctx.issue.issue_id, summary=summary)
         except ValueError as exc:
             return ActionResult(action_id=self.id, success=False, error=str(exc))
+        base = self.base if self.base is not None else self._default_base
         exists = self._git.has_branch(repo, branch)
         if self._needs_switch(repo, branch) and not self._git.is_clean(repo):
             return ActionResult(
@@ -80,7 +92,7 @@ class GitBranchAction(ActionSpec):
                 ),
             )
         if not exists:
-            self._git.create_branch(repo, branch, base=self.base)
+            self._git.create_branch(repo, branch, base=base)
         if self.checkout:
             self._git.switch(repo, branch)
         return ActionResult(
@@ -89,9 +101,9 @@ class GitBranchAction(ActionSpec):
             output={
                 "branch": branch,
                 "created": not exists,
-                "base": self.base,
+                "base": base,
                 "checked_out": self.checkout,
-                "note": _note(branch, created=not exists, base=self.base, checkout=self.checkout),
+                "note": _note(branch, created=not exists, base=base, checkout=self.checkout),
             },
         )
 

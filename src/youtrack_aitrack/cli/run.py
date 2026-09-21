@@ -25,7 +25,9 @@ _ISSUE_ID_RE = re.compile(r"^[A-Za-z][A-Za-z0-9_]*-\d+$")
 
 _ISSUE_ID_ARG = typer.Argument(..., help="YouTrack issue id, e.g. DEMO-42.")
 _WORKFLOW_OPTION = typer.Option(
-    None, "--workflow", help="Limit dispatch to a single workflow name."
+    None,
+    "--workflow",
+    help="Run exactly this workflow, bypassing trigger matching (idempotency still applies).",
 )
 _DRY_RUN_OPTION = typer.Option(
     False, "--dry-run", help="Run workflows but skip YouTrack field writes and comments."
@@ -72,24 +74,28 @@ def run_command(
         stub_llm=stub_llm,
         workflow_names={workflow} if workflow is not None else None,
     )
-    reports = _dispatch(runner, issue_id, force=force)
+    reports = _dispatch(runner, issue_id, force=force, match_triggers=workflow is None)
     _print_summary(reports)
     if any(r.state is RunState.FAILED for r in reports):
         raise typer.Exit(code=1)
 
 
-def _dispatch(runner: Runner, issue_id: str, *, force: bool) -> list[RunReport]:
+def _dispatch(
+    runner: Runner, issue_id: str, *, force: bool, match_triggers: bool
+) -> list[RunReport]:
     """Run the workflows, showing a live progress region on an interactive TTY.
 
     Non-TTY callers (tests, pipes, daemons) skip the rich Live region and run
     plainly — the final summary is the persistent record either way.
     """
     if not sys.stdout.isatty():
-        return asyncio.run(runner.run(issue_id, force=force))
-    return asyncio.run(_dispatch_live(runner, issue_id, force=force))
+        return asyncio.run(runner.run(issue_id, force=force, match_triggers=match_triggers))
+    return asyncio.run(_dispatch_live(runner, issue_id, force=force, match_triggers=match_triggers))
 
 
-async def _dispatch_live(runner: Runner, issue_id: str, *, force: bool) -> list[RunReport]:
+async def _dispatch_live(
+    runner: Runner, issue_id: str, *, force: bool, match_triggers: bool
+) -> list[RunReport]:
     """Drive a rich Live region from the asyncio loop itself.
 
     ``auto_refresh`` is off so refresh runs in this single event-loop thread —
@@ -106,7 +112,9 @@ async def _dispatch_live(runner: Runner, issue_id: str, *, force: bool) -> list[
 
         ticker = asyncio.create_task(tick())
         try:
-            reports = await runner.run(issue_id, force=force, on_progress=display.handle)
+            reports = await runner.run(
+                issue_id, force=force, match_triggers=match_triggers, on_progress=display.handle
+            )
         finally:
             ticker.cancel()
             await asyncio.gather(ticker, return_exceptions=True)

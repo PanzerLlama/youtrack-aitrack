@@ -238,3 +238,50 @@ def test_run_stub_llm_skips_anthropic_and_writes_placeholder(
     assert "claude-sonnet-4-6" in body
     # YouTrack field-write payload uses the resolved field id (PF-1), not the name.
     assert '"id":"PF-1"' in body
+
+
+MANUAL_WORKFLOW = """\
+name: manual-only
+trigger:
+  type: manual
+actions:
+  - id: mark
+    type: set_field
+    fields:
+      Status: "planned"
+"""
+
+
+@respx.mock(base_url=BASE_URL, assert_all_called=False)
+def test_run_with_workflow_flag_bypasses_trigger_matching(
+    respx_mock: respx.MockRouter, tmp_path: Path
+) -> None:
+    cfg = _make_config(tmp_path)
+    _write_workflow(cfg, "manual.yaml", MANUAL_WORKFLOW)
+    _mock_state(respx_mock, "DEMO-1", "Development in progress")
+    _mock_field_metadata(respx_mock)
+    write_route = respx_mock.post("/api/issues/DEMO-1").mock(
+        return_value=httpx.Response(200, json={"id": "DEMO-1"})
+    )
+
+    result = runner.invoke(
+        app, ["--config-dir", str(cfg), "run", "DEMO-1", "--workflow", "manual-only"]
+    )
+
+    assert result.exit_code == 0, result.output
+    assert "manual-only" in result.output
+    assert write_route.called
+
+
+@respx.mock(base_url=BASE_URL, assert_all_called=False)
+def test_run_without_workflow_flag_still_gates_on_trigger(
+    respx_mock: respx.MockRouter, tmp_path: Path
+) -> None:
+    cfg = _make_config(tmp_path)
+    _write_workflow(cfg, "manual.yaml", MANUAL_WORKFLOW)
+    _mock_state(respx_mock, "DEMO-1", "Development in progress")
+
+    result = runner.invoke(app, ["--config-dir", str(cfg), "run", "DEMO-1"])
+
+    assert result.exit_code == 0, result.output
+    assert "No matching workflows." in result.output

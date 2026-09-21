@@ -96,6 +96,7 @@ class Runner:
         issue_id: str,
         *,
         force: bool = False,
+        match_triggers: bool = True,
         on_progress: ProgressCallback | None = None,
     ) -> list[RunReport]:
         details = await self._details.get_issue_details(issue_id)
@@ -107,7 +108,14 @@ class Runner:
             to_state=details.state,
             timestamp=datetime.now(UTC),
         )
-        return await self._dispatch(event, details, {}, force=force, on_progress=on_progress)
+        return await self._dispatch(
+            event,
+            details,
+            {},
+            force=force,
+            match_triggers=match_triggers,
+            on_progress=on_progress,
+        )
 
     async def _dispatch(
         self,
@@ -117,6 +125,7 @@ class Runner:
         *,
         force: bool,
         on_progress: ProgressCallback | None,
+        match_triggers: bool = True,
     ) -> list[RunReport]:
         branch, diff, commit_sha, no_diff = self._resolve_repo_state(event.issue_id)
         reports = await self._engine.dispatch(
@@ -130,6 +139,7 @@ class Runner:
             repo_path=self._repo_dir,
             issue_details=details,
             force=force,
+            match_triggers=match_triggers,
             on_progress=on_progress,
         )
         for report in reports:

@@ -5,10 +5,10 @@ from __future__ import annotations
 import subprocess
 from pathlib import Path
 
-_TIMEOUT_SECONDS = 30
+from youtrack_aitrack.adapters.git.process import GitCommandError, run_git
 
 
-class GitDiffError(RuntimeError):
+class GitDiffError(GitCommandError):
     """Raised when the git subprocess fails or branch resolution is ambiguous."""
 
 
@@ -42,21 +42,9 @@ class GitDiffAdapter:
 
     def _run(self, args: list[str], repo_dir: Path) -> subprocess.CompletedProcess[str]:
         try:
-            return subprocess.run(
-                [self._git, *args],
-                cwd=repo_dir,
-                check=True,
-                capture_output=True,
-                text=True,
-                timeout=_TIMEOUT_SECONDS,
-            )
-        except subprocess.CalledProcessError as exc:
-            stderr = exc.stderr.strip() if exc.stderr else ""
-            raise GitDiffError(f"git {' '.join(args)} failed: {stderr}") from exc
-        except subprocess.TimeoutExpired as exc:
-            raise GitDiffError(f"git {' '.join(args)} timed out") from exc
-        except FileNotFoundError as exc:
-            raise GitDiffError(f"git executable not found: {self._git}") from exc
+            return run_git(args, repo_dir, git_executable=self._git)
+        except GitCommandError as exc:
+            raise GitDiffError(str(exc)) from exc
 
 
 def _parse_branch_list(stdout: str) -> list[str]:

@@ -115,7 +115,7 @@ def build_poller(
         git_provider=w.git,
         repo_dir=w.repo_dir,
         run_store=w.run_store,
-        state_lookup=w.yt,
+        details_lookup=w.yt,
     )
     return Poller(
         runner=runner,

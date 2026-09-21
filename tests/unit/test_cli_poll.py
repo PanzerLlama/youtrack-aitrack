@@ -97,6 +97,9 @@ def test_poll_one_shot_dispatches_and_saves_cursor(
             json=[{"id": "PF-1", "$type": "SimpleProjectCustomField", "field": {"name": "Status"}}],
         )
     )
+    respx_mock.get("/api/issues/DEMO-1").mock(
+        return_value=httpx.Response(200, json={"summary": "Smoke", "customFields": []})
+    )
     write_route = respx_mock.post("/api/issues/DEMO-1").mock(
         return_value=httpx.Response(200, json={"id": "DEMO-1"})
     )

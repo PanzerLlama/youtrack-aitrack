@@ -9,6 +9,7 @@ from typing import cast
 import pytest
 
 from youtrack_aitrack.adapters.git.diff import GitDiffError
+from youtrack_aitrack.adapters.youtrack.errors import YouTrackError
 from youtrack_aitrack.config.instance import (
     AnthropicSection,
     DefaultsSection,
@@ -21,8 +22,10 @@ from youtrack_aitrack.domain.actions.set_field import SetFieldAction
 from youtrack_aitrack.domain.agent_runner import AgentResult
 from youtrack_aitrack.domain.context import Context
 from youtrack_aitrack.domain.event import IssueEvent
+from youtrack_aitrack.domain.issue import IssueDetails
 from youtrack_aitrack.domain.run import RunReport, RunState
 from youtrack_aitrack.domain.triggers.manual import ManualTrigger
+from youtrack_aitrack.domain.triggers.status_change import StatusChangeTrigger
 from youtrack_aitrack.domain.workflow import Workflow
 from youtrack_aitrack.engine import WorkflowEngine
 from youtrack_aitrack.runtime.factory import ActionFactory
@@ -106,13 +109,23 @@ class _FakePoster:
 
 
 class _FakeStateLookup:
-    def __init__(self, state: str | None = None) -> None:
+    def __init__(
+        self,
+        state: str | None = None,
+        *,
+        summary: str = "Fake summary",
+        fail: bool = False,
+    ) -> None:
         self.state = state
+        self.summary = summary
+        self.fail = fail
         self.calls: list[str] = []
 
-    async def get_issue_state(self, issue_id: str) -> str | None:
+    async def get_issue_details(self, issue_id: str) -> IssueDetails:
         self.calls.append(issue_id)
-        return self.state
+        if self.fail:
+            raise YouTrackError("HTTP 404: issue not found")
+        return IssueDetails(summary=self.summary, description="desc", state=self.state)
 
 
 class _FakeRunStore:
@@ -189,7 +202,7 @@ def _build(
         git_provider=git,
         repo_dir=Path("/tmp/fakerepo"),
         run_store=run_store,
-        state_lookup=state_lookup,
+        details_lookup=state_lookup,
     )
     return runner, llm, writer, run_store, state_lookup
 
@@ -566,3 +579,65 @@ def test_build_cli_runner_bare_mode_requires_api_key() -> None:
 
     with pytest.raises(ValueError, match="cli_agent_mode='bare'"):
         _build_cli_runner(_wire_config(cli_agent_mode="bare", api_key=""))
+
+
+async def test_run_fetches_details_once_and_threads_them_into_context() -> None:
+    captured: list[Context] = []
+
+    class _CaptureRenderer:
+        def render(self, template: str, ctx: Context) -> str:
+            captured.append(ctx)
+            return "p"
+
+    llm = _FakeLLM()
+    wf = Workflow(
+        name="plan",
+        trigger=StatusChangeTrigger(to_state="Development in progress"),
+        actions=[AiReportAction(id="a", prompt="t.md", model="m")],
+    )
+    factory = ActionFactory(
+        agents={"claude_code_cli": llm},
+        default_agent="claude_code_cli",
+        renderer=_CaptureRenderer(),
+        writer=_FakeWriter(),
+        poster=_FakePoster(),
+    )
+    lookup = _FakeStateLookup("Development in progress", summary="Add CSV export")
+    runner = Runner(
+        config=_config(),
+        workflows=[factory.materialize_workflow(wf)],
+        engine=WorkflowEngine(),
+        git_provider=_FakeGit(branch=None),
+        repo_dir=Path("/tmp/fakerepo"),
+        run_store=_FakeRunStore(),
+        details_lookup=lookup,
+    )
+
+    reports = await runner.run("DEMO-7")
+
+    assert [r.state for r in reports] == [RunState.DONE]
+    assert lookup.calls == ["DEMO-7"]
+    assert captured[0].issue_details is not None
+    assert captured[0].issue_details.summary == "Add CSV export"
+
+
+async def test_dispatch_marks_task_meta_unavailable_when_issue_fetch_fails() -> None:
+    wf = Workflow(
+        name="plan",
+        trigger=ManualTrigger(),
+        actions=[AiReportAction(id="a", prompt="t.md", model="m", inputs=["task_meta"])],
+    )
+    runner, _, _, _, _ = _build(
+        git=_FakeGit(branch=None),
+        workflow=wf,
+        state_lookup=_FakeStateLookup(fail=True),
+    )
+
+    reports = await runner.dispatch(_manual_event())
+
+    assert len(reports) == 1
+    result = reports[0].action_results[0]
+    assert result.skipped is True
+    assert result.skip_reason is not None
+    assert "task_meta" in result.skip_reason
+    assert "issue fetch failed" in result.skip_reason

@@ -14,11 +14,13 @@ from youtrack_aitrack.adapters.git.diff import GitDiffAdapter, GitDiffError
 from youtrack_aitrack.adapters.llm.jinja import JinjaPromptRenderer
 from youtrack_aitrack.adapters.storage.runs import JsonRunStore
 from youtrack_aitrack.adapters.youtrack.client import YouTrackClient
+from youtrack_aitrack.adapters.youtrack.errors import YouTrackError
 from youtrack_aitrack.config.instance import InstanceConfig
 from youtrack_aitrack.config.loader import load_workflow
 from youtrack_aitrack.domain.agent_runner import AgentRunner
 from youtrack_aitrack.domain.event import IssueEvent
 from youtrack_aitrack.domain.inputs import GitDiffProvider
+from youtrack_aitrack.domain.issue import IssueDetails
 from youtrack_aitrack.domain.progress import ProgressCallback
 from youtrack_aitrack.domain.run import RunReport
 from youtrack_aitrack.domain.workflow import Workflow
@@ -34,8 +36,8 @@ from youtrack_aitrack.runtime.factory import (
 )
 
 
-class IssueStateLookup(Protocol):
-    async def get_issue_state(self, issue_id: str) -> str | None: ...
+class IssueDetailsLookup(Protocol):
+    async def get_issue_details(self, issue_id: str) -> IssueDetails: ...
 
 
 class ActivityFeed(Protocol):
@@ -67,7 +69,7 @@ class Runner:
         git_provider: GitDiffProvider,
         repo_dir: Path,
         run_store: RunStore,
-        state_lookup: IssueStateLookup,
+        details_lookup: IssueDetailsLookup,
     ) -> None:
         self._config = config
         self._workflows = workflows
@@ -75,7 +77,7 @@ class Runner:
         self._git = git_provider
         self._repo_dir = repo_dir
         self._run_store = run_store
-        self._state = state_lookup
+        self._details = details_lookup
 
     async def dispatch(
         self,
@@ -84,22 +86,10 @@ class Runner:
         force: bool = False,
         on_progress: ProgressCallback | None = None,
     ) -> list[RunReport]:
-        branch, diff, commit_sha, unavailable = self._resolve_repo_state(event.issue_id)
-        reports = await self._engine.dispatch(
-            event,
-            self._workflows,
-            unavailable_inputs=unavailable,
-            commit_sha=commit_sha,
-            branch=branch,
-            diff=diff,
-            base_url=self._config.defaults.base_url,
-            repo_path=self._repo_dir,
-            force=force,
-            on_progress=on_progress,
+        details, unavailable = await self._fetch_details(event.issue_id)
+        return await self._dispatch(
+            event, details, unavailable, force=force, on_progress=on_progress
         )
-        for report in reports:
-            self._run_store.save_run(report)
-        return reports
 
     async def run(
         self,
@@ -108,16 +98,50 @@ class Runner:
         force: bool = False,
         on_progress: ProgressCallback | None = None,
     ) -> list[RunReport]:
-        current_state = await self._state.get_issue_state(issue_id)
+        details = await self._details.get_issue_details(issue_id)
         event = IssueEvent(
             issue_id=issue_id,
             project=self._config.youtrack.project,
             event_kind="status_change",
             from_state=None,
-            to_state=current_state,
+            to_state=details.state,
             timestamp=datetime.now(UTC),
         )
-        return await self.dispatch(event, force=force, on_progress=on_progress)
+        return await self._dispatch(event, details, {}, force=force, on_progress=on_progress)
+
+    async def _dispatch(
+        self,
+        event: IssueEvent,
+        details: IssueDetails | None,
+        unavailable: dict[str, str],
+        *,
+        force: bool,
+        on_progress: ProgressCallback | None,
+    ) -> list[RunReport]:
+        branch, diff, commit_sha, no_diff = self._resolve_repo_state(event.issue_id)
+        reports = await self._engine.dispatch(
+            event,
+            self._workflows,
+            unavailable_inputs={**unavailable, **no_diff},
+            commit_sha=commit_sha,
+            branch=branch,
+            diff=diff,
+            base_url=self._config.defaults.base_url,
+            repo_path=self._repo_dir,
+            issue_details=details,
+            force=force,
+            on_progress=on_progress,
+        )
+        for report in reports:
+            self._run_store.save_run(report)
+        return reports
+
+    async def _fetch_details(self, issue_id: str) -> tuple[IssueDetails | None, dict[str, str]]:
+        """Fetch the issue text for poll-driven events; a failed fetch only voids task_meta."""
+        try:
+            return await self._details.get_issue_details(issue_id), {}
+        except YouTrackError as exc:
+            return None, {"task_meta": f"issue fetch failed: {_first_line(str(exc))}"}
 
     def _resolve_repo_state(
         self, issue_id: str
@@ -220,7 +244,7 @@ def build_runner(
         git_provider=w.git,
         repo_dir=w.repo_dir,
         run_store=w.run_store,
-        state_lookup=w.yt,
+        details_lookup=w.yt,
     )
 
 

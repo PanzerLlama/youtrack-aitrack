@@ -19,7 +19,7 @@ class RepoFileWriter(Protocol):
     def commit_paths(self, repo_dir: Path, paths: list[PurePosixPath], message: str) -> str: ...
 
 
-class _NoOpRepoFileWriter:
+class NoOpRepoFileWriter:
     def write_text(self, repo_dir: Path, relative_path: PurePosixPath, text: str) -> None:
         return None
 
@@ -44,7 +44,7 @@ class WriteFileAction(ActionSpec):
 
     def __init__(self, *, writer: RepoFileWriter | None = None, **data: Any) -> None:
         super().__init__(**data)
-        self._writer = writer if writer is not None else _NoOpRepoFileWriter()
+        self._writer = writer if writer is not None else NoOpRepoFileWriter()
 
     async def execute(self, ctx: Context) -> ActionResult:
         text = _source_text(ctx, self.source)
@@ -56,7 +56,7 @@ class WriteFileAction(ActionSpec):
             )
         task_id = ctx.issue.issue_id
         try:
-            rel = _safe_relative_path(self.path.replace("{task_id}", task_id))
+            rel = safe_relative_path(self.path.replace("{task_id}", task_id))
         except ValueError as exc:
             return ActionResult(action_id=self.id, success=False, error=str(exc))
         repo = ctx.repo_path if ctx.repo_path is not None else Path(".")
@@ -81,7 +81,7 @@ def _source_text(ctx: Context, source: str) -> str | None:
     return text if isinstance(text, str) else None
 
 
-def _safe_relative_path(raw: str) -> PurePosixPath:
+def safe_relative_path(raw: str) -> PurePosixPath:
     path = PurePosixPath(raw)
     if path.is_absolute() or ".." in path.parts or not path.parts:
         raise ValueError(f"write_file path must be relative and stay inside the repo: {raw!r}")

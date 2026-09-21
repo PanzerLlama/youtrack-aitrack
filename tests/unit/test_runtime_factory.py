@@ -236,3 +236,55 @@ async def test_standard_output_sink_comment_writes_via_comment_poster() -> None:
 
     assert poster.calls == [("DEMO-1", "comment body")]
     assert writer.calls == []
+
+
+def test_materialize_git_branch_injects_creator_and_default_base() -> None:
+    from youtrack_aitrack.domain.actions.git_branch import GitBranchAction
+    from youtrack_aitrack.runtime.factory import NoOpBranchCreator
+
+    creator = NoOpBranchCreator()
+    factory = ActionFactory(
+        agents={"claude_code_cli": _FakeAgentRunner("cli")},
+        default_agent="claude_code_cli",
+        renderer=_FakeRenderer(),
+        writer=_FakeWriter(),
+        poster=_FakePoster(),
+        branch_creator=creator,
+        git_base_branch="develop",
+    )
+    spec = GitBranchAction(id="b")
+
+    materialized = cast(GitBranchAction, factory.materialize(spec))
+
+    assert materialized._git is creator
+    assert materialized._default_base == "develop"
+    assert materialized.base is None
+
+
+def test_materialize_write_file_injects_writer() -> None:
+    from youtrack_aitrack.domain.actions.write_file import WriteFileAction
+    from youtrack_aitrack.runtime.factory import NoOpRepoFileWriter
+
+    file_writer = NoOpRepoFileWriter()
+    factory = ActionFactory(
+        agents={"claude_code_cli": _FakeAgentRunner("cli")},
+        default_agent="claude_code_cli",
+        renderer=_FakeRenderer(),
+        writer=_FakeWriter(),
+        poster=_FakePoster(),
+        file_writer=file_writer,
+    )
+    spec = WriteFileAction(id="w", source="plan", path="docs/{task_id}.md")
+
+    materialized = cast(WriteFileAction, factory.materialize(spec))
+
+    assert materialized._writer is file_writer
+    assert materialized.path == "docs/{task_id}.md"
+
+
+def test_factory_defaults_to_noop_git_adapters() -> None:
+    from youtrack_aitrack.domain.actions.git_branch import GitBranchAction
+    from youtrack_aitrack.runtime.factory import NoOpBranchCreator
+
+    materialized = cast(GitBranchAction, _factory().materialize(GitBranchAction(id="b")))
+    assert isinstance(materialized._git, NoOpBranchCreator)

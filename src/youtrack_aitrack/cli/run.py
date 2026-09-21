@@ -41,6 +41,9 @@ _STUB_LLM_OPTION = typer.Option(
     "--stub-llm",
     help="Substitute a placeholder for every Anthropic call (zero LLM cost).",
 )
+_SHOW_OUTPUT_OPTION = typer.Option(
+    False, "--show-output", help="Print each action's text output after the summary table."
+)
 
 
 def run_command(
@@ -51,6 +54,7 @@ def run_command(
     force: bool = _FORCE_OPTION,
     repo_dir: Path | None = _REPO_DIR_OPTION,
     stub_llm: bool = _STUB_LLM_OPTION,
+    show_output: bool = _SHOW_OUTPUT_OPTION,
 ) -> None:
     """Dispatch workflows for ISSUE_ID matching its current state."""
     if not _ISSUE_ID_RE.match(issue_id):
@@ -76,6 +80,8 @@ def run_command(
     )
     reports = _dispatch(runner, issue_id, force=force, match_triggers=workflow is None)
     _print_summary(reports)
+    if show_output:
+        _print_outputs(reports)
     if any(r.state is RunState.FAILED for r in reports):
         raise typer.Exit(code=1)
 
@@ -135,15 +141,29 @@ def _print_summary(reports: list[RunReport]) -> None:
         typer.echo(f"=== {report.workflow_name}: {report.state.value.upper()}")
 
 
+def _print_outputs(reports: list[RunReport]) -> None:
+    for report in reports:
+        for result in report.action_results:
+            text = (result.output or {}).get("text")
+            if isinstance(text, str) and text.strip():
+                typer.echo(f"\n--- {report.workflow_name} / {result.action_id}\n{text.rstrip()}")
+
+
 def _format_row(workflow_name: str, result: ActionResult, *, hook: bool) -> str:
     state = "skipped" if result.skipped else ("ok" if result.success else "fail")
-    full_note = result.skip_reason or result.error or ""
+    full_note = result.skip_reason or result.error or _success_note(result)
     note = full_note.splitlines()[0] if full_note else ""
     if "\n" in full_note:
         note += " (see run report for full error)"
     label = f"{result.action_id} (hook)" if hook else result.action_id
     time_col = _fmt_duration_ms(result.duration_ms)
     return f"{workflow_name:<28} {label:<28} {state:<8} {time_col:>8}  {note}"
+
+
+def _success_note(result: ActionResult) -> str:
+    """Actions may put a one-line human summary under output['note'] (e.g. branch created)."""
+    note = (result.output or {}).get("note")
+    return note if isinstance(note, str) else ""
 
 
 def _fmt_duration_ms(ms: int | None) -> str:

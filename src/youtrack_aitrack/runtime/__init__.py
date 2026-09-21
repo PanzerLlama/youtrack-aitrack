@@ -2,8 +2,10 @@
 
 from youtrack_aitrack.runtime.factory import (
     ActionFactory,
+    NoOpBranchCreator,
     NoOpCommentPoster,
     NoOpFieldWriter,
+    NoOpRepoFileWriter,
     StandardOutputSink,
     StubAgentRunner,
 )
@@ -25,8 +27,10 @@ __all__ = [
     "ActivityFeed",
     "IssueDetailsLookup",
     "IssueTagsLookup",
+    "NoOpBranchCreator",
     "NoOpCommentPoster",
     "NoOpFieldWriter",
+    "NoOpRepoFileWriter",
     "PollResult",
     "Poller",
     "Runner",

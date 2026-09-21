@@ -54,7 +54,9 @@ Pure pydantic models and Protocol interfaces. Stdlib + pydantic only.
 | `inputs.py` | `GitDiffProvider` Protocol |
 | `diff_filter.py` | Pure diff-trimming logic |
 | `triggers/status_change.py`, `manual.py` | Concrete trigger types |
-| `actions/ai_report.py`, `set_field.py`, `yt_comment.py` | Concrete action types. `ai_report` calls its injected `AgentRunner` — one code path covers every CLI backend. |
+| `issue.py` | `IssueDetails` — the issue's own text (summary, description, state), distinct from the `IssueEvent` that describes what happened |
+| `branch_name.py` | Pure slug + `{task_id}-{slug}` branch naming |
+| `actions/ai_report.py`, `set_field.py`, `yt_comment.py`, `git_branch.py`, `write_file.py` | Concrete action types. `ai_report` calls its injected `AgentRunner` — one code path covers every CLI backend. `git_branch` / `write_file` talk to git through the `BranchCreator` / `RepoFileWriter` Protocols. |
 
 ### `engine/` — orchestration, still pure
 
@@ -223,7 +225,7 @@ uses. The engine stays pinned; only the trigger surface widens.
 2. `runtime/runner.py:wire` instantiates every adapter once. `ActionFactory` materializes each workflow's actions with real adapters.
 3. `Poller.poll_loop` ticks every `poll_interval_seconds`.
 4. `Poller.poll_once`: read cursor → `YouTrackClient.changed_issues_since(cursor)` → for each `IssueEvent`, check tag filter → `Runner.dispatch(event)`.
-5. `Runner.dispatch` resolves branch + diff + commit_sha via `GitDiffAdapter`. Marks `git_diff` unavailable on failure.
+5. `Runner.dispatch` fetches `IssueDetails` from YouTrack (marks `task_meta` unavailable on failure) and resolves branch + diff + commit_sha via `GitDiffAdapter` (marks `git_diff` unavailable on failure). Write-side git (`git_branch`, `write_file`) goes through `GitWorkspaceAdapter`, swapped for no-ops under `--dry-run`.
 6. `Engine.dispatch` filters workflows whose `Trigger.matches(event)` is True. Builds idempotency key per (workflow, event, commit_sha). Returns early for already-processed keys.
 7. `Engine.run` per workflow: `_execute_graph` topologically schedules actions, batching independent ones via `asyncio.gather`. `Context(issue=event, branch, diff, base_url, action_outputs)` is built per batch.
 8. Actions execute. `AiReportAction.execute` calls renderer + LLM. `SetFieldAction.execute` calls the writer.

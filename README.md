@@ -162,6 +162,24 @@ in config filters which issues the daemon reacts to. See
 [docs/operations.md](./docs/operations.md) for the full set of safety knobs
 and the recommended first-run staircase.
 
+### Starting a task, not just auditing one
+
+The second shipped workflow runs the other way round — before any code
+exists. `workflows/plan-implementation.yaml` is manual:
+
+```bash
+cd /path/to/your/repo
+yta run PROJ-12 --workflow=plan-implementation --show-output
+```
+
+It creates the branch `PROJ-12-<slug-of-summary>` from your base branch and
+switches to it, runs the agent read-only in plan mode against the issue's
+summary and description, posts the resulting implementation plan as a
+comment on the issue, and commits it to `docs/plans/PROJ-12.md` on the new
+branch. You review and discuss the plan (in YouTrack, or in an interactive
+`claude` session on the branch) before anything is implemented. Details in
+[docs/workflows.md](./docs/workflows.md#example-the-plan-implementation-workflow).
+
 ## Quickstart
 
 Requires Python 3.12+ and [uv](https://docs.astral.sh/uv/). The
@@ -178,9 +196,9 @@ yta init
 cp ~/.youtrack-aitrack/.env.example ~/.youtrack-aitrack/.env
 # ...edit .env with YouTrack URL, token, project (+ ANTHROPIC_API_KEY for bare mode)...
 
-# Copy the reference workflow + prompts (one-time)
+# Copy the shipped workflows + prompts (one-time)
 git clone https://github.com/PanzerLlama/youtrack-aitrack /tmp/yta-source
-cp /tmp/yta-source/workflows/ready-for-testing-audit.yaml ~/.youtrack-aitrack/workflows/
+cp /tmp/yta-source/workflows/*.yaml ~/.youtrack-aitrack/workflows/
 cp /tmp/yta-source/prompts/*.md ~/.youtrack-aitrack/prompts/
 
 # Sanity check
@@ -234,6 +252,7 @@ yta workflows list                                # show every workflow YAML
 yta workflows validate                            # check every YAML parses
 yta run <issue-id>                                # manual dispatch
 yta run <issue-id> --dry-run --stub-llm --force  # safe rerun, no spend
+yta run <issue-id> --workflow=plan-implementation # fire a manual workflow by name
 yta poll                                          # one-shot pull from the activity feed
 yta poll --daemon                                 # continuous loop
 ```

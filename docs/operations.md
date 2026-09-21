@@ -27,8 +27,13 @@ Both `yta run` and `yta poll` accept these flags. Combine freely.
 | `--stub-llm` | yes | **no** (returns a marked placeholder) | yes | verify YouTrack wiring + field types without spending tokens |
 | `--dry-run --stub-llm` | **no** | **no** | yes | exercise the full trigger → dispatch path with zero external side effects |
 | `--force` | yes | yes | **no** (bypasses) | re-run on a previously-seen `(workflow, issue, state, commit_sha)` |
-| `--workflow=NAME` | yes | yes | yes | only run one workflow file by name; useful when you have several |
+| `--workflow=NAME` | yes | yes | yes | run exactly one workflow by name, **bypassing trigger matching** — the only way to fire a `trigger: manual` workflow (`yta run` only) |
 | `--repo-dir=PATH` | n/a | n/a | n/a | override the git repo root (default: current working directory) |
+| `--show-output` | n/a | n/a | n/a | print each action's text output after the summary table (`yta run` only) |
+
+Workflows that use `git_branch` / `write_file` change your working tree
+(new branch, checkout, a committed file). `--dry-run` also disables those
+git writes, so it stays a safe first step for them too.
 
 `--dry-run` and `--stub-llm` are orthogonal. `--force` is independent of both.
 

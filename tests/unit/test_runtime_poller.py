@@ -16,6 +16,7 @@ from youtrack_aitrack.config.instance import (
 from youtrack_aitrack.domain.actions.set_field import SetFieldAction
 from youtrack_aitrack.domain.agent_runner import AgentResult
 from youtrack_aitrack.domain.event import IssueEvent
+from youtrack_aitrack.domain.issue import IssueDetails
 from youtrack_aitrack.domain.run import RunReport
 from youtrack_aitrack.domain.triggers.status_change import StatusChangeTrigger
 from youtrack_aitrack.domain.workflow import Workflow
@@ -49,8 +50,8 @@ class _FakeGit:
 
 
 class _FakeStateLookup:
-    async def get_issue_state(self, issue_id: str) -> str | None:
-        return None
+    async def get_issue_details(self, issue_id: str) -> IssueDetails:
+        return IssueDetails(summary="s", state=None)
 
 
 class _FakeWriter:
@@ -172,7 +173,7 @@ def _build_poller(
         git_provider=_FakeGit(),
         repo_dir=Path("/tmp/fakerepo"),
         run_store=run_store,
-        state_lookup=_FakeStateLookup(),
+        details_lookup=_FakeStateLookup(),
     )
     return Poller(
         runner=runner,

@@ -15,7 +15,7 @@ from youtrack_aitrack.runtime.poller import (
 )
 from youtrack_aitrack.runtime.runner import (
     ActivityFeed,
-    IssueStateLookup,
+    IssueDetailsLookup,
     Runner,
     build_runner,
 )
@@ -23,7 +23,7 @@ from youtrack_aitrack.runtime.runner import (
 __all__ = [
     "ActionFactory",
     "ActivityFeed",
-    "IssueStateLookup",
+    "IssueDetailsLookup",
     "IssueTagsLookup",
     "NoOpCommentPoster",
     "NoOpFieldWriter",

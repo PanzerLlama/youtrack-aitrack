@@ -174,9 +174,11 @@ yta run PROJ-12 --workflow=plan-implementation --show-output
 
 It creates the branch `PROJ-12-<slug-of-summary>` from your base branch and
 switches to it, runs the agent read-only in plan mode against the issue's
-summary and description, posts the resulting implementation plan as a
-comment on the issue, and commits it to `docs/plans/PROJ-12.md` on the new
-branch. You review and discuss the plan (in YouTrack, or in an interactive
+summary and description, and posts the resulting implementation plan as a
+comment on the issue. The plan is then persisted in the project: as a
+[beads](https://github.com/steveyegge/beads) issue when the repo uses beads,
+otherwise committed to `docs/plans/PROJ-12.md` on the new branch. You
+review and discuss the plan (in YouTrack, in beads, or in an interactive
 `claude` session on the branch) before anything is implemented. Details in
 [docs/workflows.md](./docs/workflows.md#example-the-plan-implementation-workflow).
 

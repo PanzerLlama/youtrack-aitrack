@@ -9,6 +9,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Protocol
 
+from youtrack_aitrack.adapters.beads.client import BeadsCliClient
 from youtrack_aitrack.adapters.cli.claude_code import ClaudeCodeCliRunner
 from youtrack_aitrack.adapters.git.diff import GitDiffAdapter, GitDiffError
 from youtrack_aitrack.adapters.git.workspace import GitWorkspaceAdapter
@@ -30,6 +31,7 @@ from youtrack_aitrack.engine.idempotency import IdempotencyStore
 from youtrack_aitrack.engine.run_store import RunStore
 from youtrack_aitrack.runtime.factory import (
     ActionFactory,
+    DryRunIssueTracker,
     NoOpBranchCreator,
     NoOpCommentPoster,
     NoOpFieldWriter,
@@ -207,6 +209,7 @@ def wire(
     writer = NoOpFieldWriter() if dry_run else yt
     poster = NoOpCommentPoster() if dry_run else yt
     workspace = GitWorkspaceAdapter()
+    beads = BeadsCliClient()
     factory = ActionFactory(
         agents=agents,
         default_agent=config.defaults.default_agent,
@@ -217,6 +220,7 @@ def wire(
         branch_creator=NoOpBranchCreator() if dry_run else workspace,
         file_writer=NoOpRepoFileWriter() if dry_run else workspace,
         git_base_branch=config.defaults.git_base_branch,
+        issue_tracker=DryRunIssueTracker(beads) if dry_run else beads,
     )
     workflows = [
         factory.materialize_workflow(w) for w in _load_workflows(config, config_dir, workflow_names)

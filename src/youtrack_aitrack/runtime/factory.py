@@ -6,6 +6,11 @@ from pathlib import Path, PurePosixPath
 
 from youtrack_aitrack.domain.action import ActionSpec
 from youtrack_aitrack.domain.actions.ai_report import AiReportAction, PromptRenderer
+from youtrack_aitrack.domain.actions.bd_issue import (
+    BdIssueAction,
+    IssueTrackerClient,
+    TrackedIssue,
+)
 from youtrack_aitrack.domain.actions.git_branch import BranchCreator, GitBranchAction
 from youtrack_aitrack.domain.actions.set_field import FieldWriter, SetFieldAction
 from youtrack_aitrack.domain.actions.write_file import RepoFileWriter, WriteFileAction
@@ -56,6 +61,19 @@ class NoOpRepoFileWriter:
 
     def commit_paths(self, repo_dir: Path, paths: list[PurePosixPath], message: str) -> str:
         return ""
+
+
+class DryRunIssueTracker:
+    """Dry-run IssueTrackerClient — reports real availability, never creates anything."""
+
+    def __init__(self, real: IssueTrackerClient) -> None:
+        self._real = real
+
+    def is_available(self, repo_dir: Path) -> bool:
+        return self._real.is_available(repo_dir)
+
+    def create_issue(self, repo_dir: Path, issue: TrackedIssue) -> str:
+        return "dry-run"
 
 
 class StandardOutputSink:
@@ -125,6 +143,7 @@ class ActionFactory:
         branch_creator: BranchCreator | None = None,
         file_writer: RepoFileWriter | None = None,
         git_base_branch: str = "main",
+        issue_tracker: IssueTrackerClient | None = None,
     ) -> None:
         if default_agent not in agents:
             raise ValueError(
@@ -139,6 +158,7 @@ class ActionFactory:
         self._branch_creator = branch_creator or NoOpBranchCreator()
         self._file_writer = file_writer or NoOpRepoFileWriter()
         self._git_base_branch = git_base_branch
+        self._issue_tracker = issue_tracker
 
     def materialize(self, spec: ActionSpec) -> ActionSpec:
         data = spec.model_dump()
@@ -167,6 +187,8 @@ class ActionFactory:
                 )
             case "write_file":
                 return WriteFileAction(**data, writer=self._file_writer)
+            case "bd_issue":
+                return BdIssueAction(**data, tracker=self._issue_tracker, writer=self._file_writer)
             case _:
                 return spec
 

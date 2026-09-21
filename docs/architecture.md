@@ -56,7 +56,7 @@ Pure pydantic models and Protocol interfaces. Stdlib + pydantic only.
 | `triggers/status_change.py`, `manual.py` | Concrete trigger types |
 | `issue.py` | `IssueDetails` — the issue's own text (summary, description, state), distinct from the `IssueEvent` that describes what happened |
 | `branch_name.py` | Pure slug + `{task_id}-{slug}` branch naming |
-| `actions/ai_report.py`, `set_field.py`, `yt_comment.py`, `git_branch.py`, `write_file.py` | Concrete action types. `ai_report` calls its injected `AgentRunner` — one code path covers every CLI backend. `git_branch` / `write_file` talk to git through the `BranchCreator` / `RepoFileWriter` Protocols. |
+| `actions/ai_report.py`, `set_field.py`, `yt_comment.py`, `git_branch.py`, `write_file.py`, `bd_issue.py` | Concrete action types. `ai_report` calls its injected `AgentRunner` — one code path covers every CLI backend. `git_branch` / `write_file` talk to git through the `BranchCreator` / `RepoFileWriter` Protocols; `bd_issue` talks to beads through `IssueTrackerClient` (adapter `adapters/beads/`). |
 
 ### `engine/` — orchestration, still pure
 

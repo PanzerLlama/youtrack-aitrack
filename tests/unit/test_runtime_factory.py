@@ -288,3 +288,34 @@ def test_factory_defaults_to_noop_git_adapters() -> None:
 
     materialized = cast(GitBranchAction, _factory().materialize(GitBranchAction(id="b")))
     assert isinstance(materialized._git, NoOpBranchCreator)
+
+
+def test_materialize_bd_issue_injects_tracker_and_file_writer() -> None:
+    from youtrack_aitrack.domain.actions.bd_issue import BdIssueAction
+    from youtrack_aitrack.runtime.factory import DryRunIssueTracker, NoOpRepoFileWriter
+
+    class _Tracker:
+        def is_available(self, repo_dir: Path) -> bool:
+            return True
+
+        def create_issue(self, repo_dir: Path, issue: object) -> str:
+            return "x-1"
+
+    tracker = DryRunIssueTracker(_Tracker())  # type: ignore[arg-type]
+    file_writer = NoOpRepoFileWriter()
+    factory = ActionFactory(
+        agents={"claude_code_cli": _FakeAgentRunner("cli")},
+        default_agent="claude_code_cli",
+        renderer=_FakeRenderer(),
+        writer=_FakeWriter(),
+        poster=_FakePoster(),
+        file_writer=file_writer,
+        issue_tracker=tracker,
+    )
+
+    materialized = cast(BdIssueAction, factory.materialize(BdIssueAction(id="t", source="p")))
+
+    assert materialized._tracker is tracker
+    assert materialized._writer is file_writer
+    assert tracker.is_available(Path("/r")) is True
+    assert tracker.create_issue(Path("/r"), None) == "dry-run"  # type: ignore[arg-type]

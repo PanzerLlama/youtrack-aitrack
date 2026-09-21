@@ -91,7 +91,7 @@ Every action declares:
 
 ```yaml
 - id: my_action            # required, unique within the workflow
-  type: <action-type>      # required: ai_report | set_field | yt_comment | git_branch | write_file
+  type: <action-type>      # required: ai_report | set_field | yt_comment | git_branch | write_file | bd_issue
   depends_on: [other_id]   # optional list; this action waits for those
   inputs: [git_diff, ...]  # optional; declares what context this needs
   output:                  # optional; tells engine where to persist result
@@ -232,6 +232,42 @@ optionally committing it on the current branch.
 | `commit_message` | string \| null | When set, only this file is staged and committed (`{task_id}` substituted). Other local changes stay untouched. |
 
 Under `--dry-run` nothing is written or committed.
+
+#### `bd_issue`
+
+Persists an upstream action's text output as an issue in the target
+project's [beads](https://github.com/steveyegge/beads) database, with a file
+fallback for projects that don't use beads. Availability is decided
+deterministically by the action — `bd` on `PATH` **and** a `.beads/`
+directory in the repo — never by the agent.
+
+```yaml
+- id: track_plan
+  type: bd_issue
+  depends_on: [implementation_plan]
+  source: implementation_plan                 # action id providing output.text
+  title: "{task_id}: {summary}"               # default
+  issue_type: feature                         # bd --type; default task
+  priority: 2                                 # bd --priority; default 2
+  external_ref: "{task_id}"                   # default; bd --external-ref
+  fallback_path: "docs/plans/{task_id}.md"    # optional
+  fallback_commit_message: "docs: implementation plan for {task_id}"   # optional
+```
+
+| Field | Type | Notes |
+|---|---|---|
+| `source` | string | Id of the action whose `output.text` becomes the issue body (`bd create --body-file -`). |
+| `title` | string | `{task_id}` and `{summary}` (issue summary) are substituted. |
+| `issue_type`, `priority` | string, int | Passed to `bd create --type` / `--priority`. |
+| `external_ref` | string \| null | Passed to `--external-ref`; defaults to the YouTrack id so the two issues stay linked. |
+| `fallback_path` | string \| null | When beads is unavailable, write the text here instead (same rules as `write_file.path`). Without it the action is **skipped**, not failed. |
+| `fallback_commit_message` | string \| null | Commit the fallback file (`{task_id}` substituted). |
+
+The result carries `output.tracker` (`beads` or `file`), `output.issue_id`
+or `output.path`, and an `output.text` one-liner ("Implementation plan
+tracked in beads as …") so you can add `output: { kind: comment }` to echo
+where the plan landed. Under `--dry-run` availability is still detected but
+no issue is created and no file written.
 
 ## OutputSpec
 
@@ -383,12 +419,13 @@ actions:
     output: { kind: comment }
     prompt: implementation_plan.md
     model: claude-sonnet-4-6
-  - id: save_plan
-    type: write_file
+  - id: track_plan
+    type: bd_issue
     depends_on: [implementation_plan]
     source: implementation_plan
-    path: "docs/plans/{task_id}.md"
-    commit_message: "docs: implementation plan for {task_id}"
+    issue_type: feature
+    fallback_path: "docs/plans/{task_id}.md"
+    fallback_commit_message: "docs: implementation plan for {task_id}"
 ```
 
 ```bash
@@ -400,8 +437,11 @@ What happens: the branch `PROJ-12-<slug-of-summary>` is created from
 `defaults.git_base_branch` and checked out (refused if tracked files have
 uncommitted changes); the agent runs read-only in plan mode with the issue
 summary and description in its prompt; the plan is posted as a comment on
-the issue and committed to `docs/plans/PROJ-12.md` on the new branch;
-`--show-output` also prints it in the terminal. Discuss and refine the plan
+the issue; then it is persisted in the project — as a beads issue
+(external-ref `PROJ-12`) when the repo has `bd` + `.beads/`, otherwise
+committed to `docs/plans/PROJ-12.md` on the new branch. `--show-output`
+also prints it in the terminal. Prefer both beads and the file? Add a
+`write_file` action next to `bd_issue`. Discuss and refine the plan
 in an interactive `claude` session on that branch. To regenerate after
 editing the issue, re-run with `--force` — the existing branch is reused.
 

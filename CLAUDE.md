@@ -56,7 +56,7 @@ bd close <id>         # Complete work
 
 **First reference workflow** — when an issue moves to `Ready for testing`, three parallel AI reports run (Security/PCI audit, Pages Changed for UI review, QA Plan for manual browser testing) and write back to the issue's custom fields.
 
-**Second reference workflow** (`plan-implementation`, manual) — `yta run <id> --workflow=plan-implementation` creates the branch `{task_id}-{slug}` from the base branch, runs the agent read-only in plan mode against the issue summary + description, posts the plan as a YouTrack comment and commits it to `docs/plans/<id>.md` on the branch. Action types `git_branch` and `write_file` exist for this; `ai_report` has `mode: plan`.
+**Second reference workflow** (`plan-implementation`, manual) — `yta run <id> --workflow=plan-implementation` creates the branch `{task_id}-{slug}` from the base branch, runs the agent read-only in plan mode against the issue summary + description, posts the plan as a YouTrack comment and persists it in the project: a beads issue (`bd_issue` action, deterministic detection: `bd` on PATH + `.beads/`) or, without beads, `docs/plans/<id>.md` committed on the branch. Action types `git_branch`, `write_file`, `bd_issue` exist for this; `ai_report` has `mode: plan`.
 
 **Single-project per instance.** One running daemon binds to one YouTrack project. Multi-project = multiple instances with separate configs. Reduces config and token sprawl.
 
@@ -216,4 +216,4 @@ MIT.
 
 ## Status (today: 2026-09-21)
 
-Beta. Core daemon path verified end-to-end against YouTrack Cloud. Phase 1 of the CLI-agent pivot is shipped (`AgentRunner` Protocol, `ClaudeCodeCliRunner`, per-action `agent:` field, bare/oauth modes, `--version` flag, stderr passthrough). The `plan-implementation` manual workflow shipped 2026-09-21 (`IssueDetails` in Context, `git_branch` + `write_file` actions, `GitWorkspaceAdapter`, `ai_report.mode: plan`, `--workflow` trigger bypass, `--show-output`). Phase 2 (Codex/Gemini runners, CLI variants of pages_changed + qa_plan prompts, init flow refresh) is open as a separate epic. See `bd ready`.
+Beta. Core daemon path verified end-to-end against YouTrack Cloud. Phase 1 of the CLI-agent pivot is shipped (`AgentRunner` Protocol, `ClaudeCodeCliRunner`, per-action `agent:` field, bare/oauth modes, `--version` flag, stderr passthrough). The `plan-implementation` manual workflow shipped 2026-09-21 (`IssueDetails` in Context, `git_branch` + `write_file` + `bd_issue` actions, `GitWorkspaceAdapter`, `BeadsCliClient`, `ai_report.mode: plan`, `--workflow` trigger bypass, `--show-output`). Phase 2 (Codex/Gemini runners, CLI variants of pages_changed + qa_plan prompts, init flow refresh) is open as a separate epic. See `bd ready`.

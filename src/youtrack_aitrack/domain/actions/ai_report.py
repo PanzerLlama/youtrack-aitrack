@@ -8,7 +8,12 @@ from typing import Any, Literal, Protocol
 from pydantic import PrivateAttr
 
 from youtrack_aitrack.domain.action import ActionSpec
-from youtrack_aitrack.domain.agent_runner import AgentResult, AgentRunner, AgentRunnerError
+from youtrack_aitrack.domain.agent_runner import (
+    AgentMode,
+    AgentResult,
+    AgentRunner,
+    AgentRunnerError,
+)
 from youtrack_aitrack.domain.context import Context
 from youtrack_aitrack.domain.run import ActionResult
 from youtrack_aitrack.registry import register_action
@@ -45,6 +50,7 @@ class _NoOpAgentRunner:
         commit_sha: str | None,
         timeout_s: float,
         model: str | None = None,
+        mode: AgentMode = "default",
     ) -> AgentResult:
         return AgentResult(output="", exit_code=0, duration_s=0.0, model_used=model)
 
@@ -60,6 +66,7 @@ class AiReportAction(ActionSpec):
     prompt: str
     model: str
     agent: str | None = None
+    mode: AgentMode = "default"
 
     _runner: AgentRunner = PrivateAttr()
     _renderer: PromptRenderer = PrivateAttr()
@@ -88,6 +95,7 @@ class AiReportAction(ActionSpec):
                 commit_sha=ctx.commit_sha,
                 timeout_s=self._timeout_s,
                 model=self.model,
+                mode=self.mode,
             )
         except AgentRunnerError as exc:
             return ActionResult(action_id=self.id, success=False, error=_format_error(exc))

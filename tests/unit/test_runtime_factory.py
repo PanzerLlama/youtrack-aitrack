@@ -34,6 +34,7 @@ class _FakeAgentRunner:
         commit_sha: str | None,
         timeout_s: float,
         model: str | None = None,
+        mode: str = "default",
     ) -> AgentResult:
         return AgentResult(
             output=f"{self.label}[{model}]:{prompt}",

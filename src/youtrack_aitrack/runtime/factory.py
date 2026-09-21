@@ -8,7 +8,7 @@ from youtrack_aitrack.domain.action import ActionSpec
 from youtrack_aitrack.domain.actions.ai_report import AiReportAction, PromptRenderer
 from youtrack_aitrack.domain.actions.set_field import FieldWriter, SetFieldAction
 from youtrack_aitrack.domain.actions.yt_comment import CommentPoster, YtCommentAction
-from youtrack_aitrack.domain.agent_runner import AgentResult, AgentRunner
+from youtrack_aitrack.domain.agent_runner import AgentMode, AgentResult, AgentRunner
 from youtrack_aitrack.domain.output import CommentOutput, CustomFieldOutput
 from youtrack_aitrack.domain.workflow import Workflow
 
@@ -64,11 +64,13 @@ class StubAgentRunner:
         commit_sha: str | None,
         timeout_s: float,
         model: str | None = None,
+        mode: AgentMode = "default",
     ) -> AgentResult:
         body = (
             "[STUB AGENT] action stub — no real agent backend was invoked.\n"
             "\n"
             f"Model requested: {model}\n"
+            f"Mode: {mode}\n"
             f"Prompt length: {len(prompt)} characters\n"
             f"Working dir: {cwd}\n"
             f"Commit SHA: {commit_sha}\n"

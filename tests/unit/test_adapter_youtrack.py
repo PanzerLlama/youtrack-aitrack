@@ -438,3 +438,54 @@ async def test_unknown_field_raises_typed_error(respx_mock: respx.MockRouter) ->
     client = _make_client()
     with pytest.raises(YouTrackError, match="not found"):
         await client.set_fields("DEMO-1", {"Missing": "x"})
+
+
+@respx.mock(base_url=BASE_URL)
+async def test_get_issue_details_requests_summary_description_and_state(
+    respx_mock: respx.MockRouter,
+) -> None:
+    route = respx_mock.get("/api/issues/DEMO-1").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "summary": "Add CSV export",
+                "description": "Users need to download invoices as CSV.",
+                "customFields": [
+                    {"name": STATE_FIELD_NAME, "value": {"name": "Development in progress"}},
+                ],
+            },
+        )
+    )
+
+    details = await _make_client().get_issue_details("DEMO-1")
+
+    assert details.summary == "Add CSV export"
+    assert details.description == "Users need to download invoices as CSV."
+    assert details.state == "Development in progress"
+    fields = route.calls.last.request.url.params["fields"]
+    assert "summary" in fields
+    assert "description" in fields
+    assert "customFields(name,value(name))" in fields
+
+
+@respx.mock(base_url=BASE_URL)
+async def test_get_issue_details_tolerates_missing_description_and_state(
+    respx_mock: respx.MockRouter,
+) -> None:
+    respx_mock.get("/api/issues/DEMO-1").mock(
+        return_value=httpx.Response(200, json={"summary": "Bare", "description": None})
+    )
+
+    details = await _make_client().get_issue_details("DEMO-1")
+
+    assert details.summary == "Bare"
+    assert details.description is None
+    assert details.state is None
+
+
+@respx.mock(base_url=BASE_URL)
+async def test_get_issue_details_raises_on_404(respx_mock: respx.MockRouter) -> None:
+    respx_mock.get("/api/issues/DEMO-404").mock(return_value=httpx.Response(404, json={}))
+
+    with pytest.raises(YouTrackError):
+        await _make_client().get_issue_details("DEMO-404")

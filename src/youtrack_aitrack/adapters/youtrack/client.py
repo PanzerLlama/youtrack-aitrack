@@ -11,6 +11,7 @@ import httpx
 
 from youtrack_aitrack.adapters.youtrack.errors import YouTrackError
 from youtrack_aitrack.domain.event import STATE_FIELD_NAME, IssueEvent
+from youtrack_aitrack.domain.issue import IssueDetails
 
 # YouTrack /api/activitiesPage returns a page wrapper {activities, afterCursor, beforeCursor};
 # the fields= query selects keys from the *top-level* response, so activity-level fields must
@@ -26,6 +27,7 @@ _ACTIVITY_FIELDS = (
     "afterCursor,beforeCursor"
 )
 _FIELD_METADATA_FIELDS = "id,$type,field(name)"
+_ISSUE_DETAILS_FIELDS = "summary,description,customFields(name,value(name))"
 _DEFAULT_TIMEOUT = 30.0
 
 
@@ -85,19 +87,13 @@ class YouTrackClient:
         return tags
 
     async def get_issue_state(self, issue_id: str) -> str | None:
+        return (await self.get_issue_details(issue_id)).state
+
+    async def get_issue_details(self, issue_id: str) -> IssueDetails:
         url = f"{self._base}/api/issues/{issue_id}"
-        resp = await self._http.get(url, params={"fields": "customFields(name,value(name))"})
+        resp = await self._http.get(url, params={"fields": _ISSUE_DETAILS_FIELDS})
         _check(resp)
-        for cf in resp.json().get("customFields", []):
-            if cf.get("name") != STATE_FIELD_NAME:
-                continue
-            value = cf.get("value")
-            if isinstance(value, dict):
-                name = value.get("name")
-                if isinstance(name, str):
-                    return name
-            return None
-        return None
+        return _parse_issue_details(resp.json())
 
     async def changed_issues_since(self, cursor: str | None) -> tuple[list[IssueEvent], str | None]:
         params: dict[str, str] = {
@@ -178,6 +174,29 @@ def _build_cf_payload(meta: _FieldMeta, value: str) -> dict[str, Any]:
             f"unsupported custom field type {meta.issue_type!r}; only Simple/Text supported"
         )
     return payload
+
+
+def _parse_issue_details(data: dict[str, Any]) -> IssueDetails:
+    summary = data.get("summary")
+    description = data.get("description")
+    return IssueDetails(
+        summary=summary if isinstance(summary, str) else "",
+        description=description if isinstance(description, str) else None,
+        state=_state_value(data.get("customFields") or []),
+    )
+
+
+def _state_value(custom_fields: list[dict[str, Any]]) -> str | None:
+    for cf in custom_fields:
+        if cf.get("name") != STATE_FIELD_NAME:
+            continue
+        value = cf.get("value")
+        if isinstance(value, dict):
+            name = value.get("name")
+            if isinstance(name, str):
+                return name
+        return None
+    return None
 
 
 def _project_to_issue_type(project_type: str) -> str:

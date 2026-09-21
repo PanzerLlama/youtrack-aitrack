@@ -195,3 +195,21 @@ async def test_model_used_echoes_requested_model(fake_success: Path, tmp_path: P
         "p", cwd=tmp_path, commit_sha=None, timeout_s=5.0, model="claude-opus-4-7"
     )
     assert result.model_used == "claude-opus-4-7"
+
+
+async def test_plan_mode_appends_permission_mode_flag(fake_echo_args: Path, tmp_path: Path) -> None:
+    runner = ClaudeCodeCliRunner(asyncio.Semaphore(1), binary=str(fake_echo_args))
+    result = await runner.run(
+        "plan this", cwd=tmp_path, commit_sha=None, timeout_s=5.0, mode="plan"
+    )
+    lines = result.output.splitlines()
+    assert "--permission-mode" in lines
+    assert lines[lines.index("--permission-mode") + 1] == "plan"
+
+
+async def test_default_mode_omits_permission_mode_flag(
+    fake_echo_args: Path, tmp_path: Path
+) -> None:
+    runner = ClaudeCodeCliRunner(asyncio.Semaphore(1), binary=str(fake_echo_args))
+    result = await runner.run("audit", cwd=tmp_path, commit_sha=None, timeout_s=5.0)
+    assert "--permission-mode" not in result.output.splitlines()

@@ -1,0 +1,41 @@
+name: plan-implementation
+description: |
+  Manual workflow for starting work on a task. Run it against an issue in
+  "Development in progress":
+
+      yta run <issue-id> --workflow=plan-implementation
+
+  It creates the feature branch <issue-id>-<slug-of-summary> from the base
+  branch and switches to it, runs the agent in read-only plan mode against
+  the issue summary + description, posts the resulting plan as a comment on
+  the issue, and commits it to docs/plans/<issue-id>.md on the new branch.
+  Review the plan in YouTrack or on the branch, then continue the discussion
+  in an interactive `claude` session on that branch. Re-run with --force
+  after editing the issue to regenerate the plan.
+
+trigger:
+  type: manual
+
+actions:
+  - id: create_branch
+    type: git_branch
+    inputs: [task_meta]
+    # base: main            # defaults to defaults.git_base_branch
+    name: "{task_id}-{slug}"
+    checkout: true
+
+  - id: implementation_plan
+    type: ai_report
+    inputs: [task_meta, dependency_outputs]
+    depends_on: [create_branch]
+    mode: plan
+    output: { kind: comment }
+    prompt: implementation_plan.md
+    model: claude-sonnet-4-6
+
+  - id: save_plan
+    type: write_file
+    depends_on: [implementation_plan]
+    source: implementation_plan
+    path: "docs/plans/{task_id}.md"
+    commit_message: "docs: implementation plan for {task_id}"

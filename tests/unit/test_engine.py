@@ -736,3 +736,30 @@ async def test_dispatch_without_callback_still_runs() -> None:
     [report] = await WorkflowEngine().dispatch(_manual_event(), [wf])
     assert report.state is RunState.DONE
     assert report.action_results[0].duration_ms is not None
+
+
+async def test_run_threads_issue_details_into_context() -> None:
+    from youtrack_aitrack.domain.issue import IssueDetails
+
+    seen: list[Context] = []
+
+    class _Capture(ActionSpec):
+        type: str = "capture"
+
+        async def execute(self, ctx: Context) -> ActionResult:
+            seen.append(ctx)
+            return ActionResult(action_id=self.id, success=True)
+
+    wf = Workflow(
+        name="wf",
+        trigger=ManualTrigger(),
+        actions=[_Capture(id="a")],
+        on_success=[_Capture(id="hook")],
+    )
+    details = IssueDetails(summary="Add export", description="CSV", state="Open")
+    engine = WorkflowEngine()
+    report = await engine.run(wf, _manual_event(), issue_details=details)
+
+    assert report.state is RunState.DONE
+    assert len(seen) == 2
+    assert all(c.issue_details == details for c in seen)

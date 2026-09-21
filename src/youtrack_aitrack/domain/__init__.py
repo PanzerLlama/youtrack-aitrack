@@ -3,6 +3,7 @@
 from youtrack_aitrack.domain.action import ActionSpec
 from youtrack_aitrack.domain.context import Context
 from youtrack_aitrack.domain.event import EventKind, IssueEvent
+from youtrack_aitrack.domain.issue import IssueDetails
 from youtrack_aitrack.domain.output import (
     CommentOutput,
     CustomFieldOutput,
@@ -19,6 +20,7 @@ __all__ = [
     "Context",
     "CustomFieldOutput",
     "EventKind",
+    "IssueDetails",
     "IssueEvent",
     "OutputSpec",
     "RunState",

@@ -55,6 +55,7 @@ class ClaudeCodeCliRunner:
         commit_sha: str | None,
         timeout_s: float,
         model: str | None = None,
+        mode: str = "default",
     ) -> AgentResult:
         args: list[str] = [self._binary]
         if self._bare:
@@ -64,6 +65,10 @@ class ClaudeCodeCliRunner:
             args.extend(["--allowedTools", self._allowed_tools])
         if model is not None:
             args.extend(["--model", model])
+        if mode == "plan":
+            # Plan mode keeps the agent read-only: it explores the tree and its
+            # final message is the plan. Verified against Claude Code 2.1 headless.
+            args.extend(["--permission-mode", "plan"])
 
         async with self._semaphore:
             return await self._spawn(args, cwd=cwd, timeout_s=timeout_s, model=model)

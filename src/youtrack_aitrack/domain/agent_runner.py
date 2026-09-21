@@ -10,7 +10,8 @@ The signature carries cwd + commit_sha so that working-tree-aware backends
 pre-embedded diff. SDK-style backends (Anthropic API) accept these args
 and discard them. ``model`` lets the caller pass the per-action model
 choice through to backends that select model per-call (SDK) while CLI
-runners may map it to a ``--model`` flag.
+runners may map it to a ``--model`` flag. ``mode`` selects between full
+tool access and a read-only planning session.
 
 AgentResult carries subprocess-style metadata (exit code, duration, model
 used) so the engine has uniform observability across backends.
@@ -19,9 +20,12 @@ used) so the engine has uniform observability across backends.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Protocol, runtime_checkable
+from typing import Literal, Protocol, runtime_checkable
 
 from pydantic import BaseModel, ConfigDict
+
+AgentMode = Literal["default", "plan"]
+"""How the agent may act: ``default`` = full tool access, ``plan`` = read-only, answer is a plan."""
 
 
 class AgentResult(BaseModel):
@@ -59,4 +63,5 @@ class AgentRunner(Protocol):
         commit_sha: str | None,
         timeout_s: float,
         model: str | None = None,
+        mode: AgentMode = "default",
     ) -> AgentResult: ...

@@ -76,6 +76,7 @@ class _FakeLLM:
         commit_sha: str | None,
         timeout_s: float,
         model: str | None = None,
+        mode: str = "default",
     ) -> AgentResult:
         return AgentResult(output="", exit_code=0, duration_s=0.0, model_used=model)
 

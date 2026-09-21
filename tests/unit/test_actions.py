@@ -6,6 +6,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
+from pydantic import ValidationError
 
 # Importing the package executes the @register_action decorators.
 import youtrack_aitrack.domain.actions  # noqa: F401
@@ -62,6 +63,7 @@ class _RecordingAgentRunner:
         commit_sha: str | None,
         timeout_s: float,
         model: str | None = None,
+        mode: str = "default",
     ) -> AgentResult:
         self.calls.append(
             {
@@ -70,6 +72,7 @@ class _RecordingAgentRunner:
                 "commit_sha": commit_sha,
                 "timeout_s": timeout_s,
                 "model": model,
+                "mode": mode,
             }
         )
         if self._raise is not None:
@@ -256,3 +259,21 @@ async def test_set_field_uses_injected_writer() -> None:
     a = SetFieldAction(id="s1", fields={"Audit Status": "done"}, writer=writer)
     await a.execute(_ctx())
     assert writer.calls == [("DEMO-1", {"Audit Status": "done"})]
+
+
+@pytest.mark.asyncio
+async def test_ai_report_defaults_to_default_mode_and_passes_plan_mode() -> None:
+    runner = _RecordingAgentRunner()
+    default_action = AiReportAction(id="a", prompt="p.md", model="m", runner=runner)
+    plan_action = AiReportAction(id="b", prompt="p.md", model="m", mode="plan", runner=runner)
+    ctx = _ctx()
+
+    await default_action.execute(ctx)
+    await plan_action.execute(ctx)
+
+    assert [c["mode"] for c in runner.calls] == ["default", "plan"]
+
+
+def test_ai_report_rejects_unknown_mode() -> None:
+    with pytest.raises(ValidationError):
+        AiReportAction(id="a", prompt="p.md", model="m", mode="yolo")  # type: ignore[arg-type]

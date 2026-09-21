@@ -67,13 +67,23 @@ it came from.
 
 ### `manual`
 
-Fires only when `yta run <issue-id>` fabricates a manual event. Use for
-workflows you trigger on-demand rather than on state changes:
+Never fires from the activity feed. Use for workflows you start on demand by
+naming them explicitly:
 
 ```yaml
 trigger:
   type: manual
 ```
+
+```bash
+yta run <issue-id> --workflow=<name>
+```
+
+`--workflow=NAME` bypasses trigger matching entirely (the name already says
+which workflow you want), so a `manual` workflow runs regardless of the
+issue's state. Idempotency still applies — pass `--force` to re-run for the
+same issue. The poll/daemon path never bypasses triggers, so a `manual`
+workflow can never fire unattended.
 
 ## Actions
 
@@ -81,7 +91,7 @@ Every action declares:
 
 ```yaml
 - id: my_action            # required, unique within the workflow
-  type: <action-type>      # required: ai_report | set_field | yt_comment
+  type: <action-type>      # required: ai_report | set_field | yt_comment | git_branch | write_file
   depends_on: [other_id]   # optional list; this action waits for those
   inputs: [git_diff, ...]  # optional; declares what context this needs
   output:                  # optional; tells engine where to persist result
@@ -104,7 +114,7 @@ Recognised input names:
 | Name | Available when |
 |---|---|
 | `git_diff` | Runner could resolve a branch and produce a diff. |
-| `task_meta` | Always (issue id, project, transition, actor, timestamp). |
+| `task_meta` | The issue's summary, description and state could be fetched from YouTrack (`ctx.issue_details`). Unavailable only when that GET fails; the event fields (id, project, transition, actor, timestamp) are always present. |
 | `route_index` | Reserved for future use; currently always unavailable. |
 | `dependency_outputs` | Always (an action `depends_on` automatically receives upstream `ActionResult`s in context). |
 
@@ -134,6 +144,7 @@ backend, returns the text.
 | `prompt` | string | Path to a Jinja template, relative to `paths.prompts_dir`. |
 | `model` | string | Model id. Passed verbatim to the backend — accepts whatever the chosen backend accepts (`claude-sonnet-4-6`, `claude-opus-4-7`, the `sonnet`/`opus`/`haiku` aliases for the CLI backend, etc.). |
 | `agent` | string \| null | Backend name. Only `claude_code_cli` ships today (future `codex_cli` / `gemini_cli` arrive in Phase 2). Omit to inherit `defaults.default_agent`. Unknown names fail at runtime composition. |
+| `mode` | `default` \| `plan` | `default` gives the agent its normal tools. `plan` runs it read-only (`--permission-mode plan` on the CLI backend): it explores the tree and its final message is the deliverable — use it for planning prompts that must not edit files. |
 | `output` | OutputSpec | Where to write the agent's result. See below. |
 
 The shipping backend is documented under
@@ -172,6 +183,55 @@ Posts a comment to the issue.
 | Field | Type | Notes |
 |---|---|---|
 | `body` | string | Comment text. |
+
+#### `git_branch`
+
+Creates the issue's feature branch from a base branch and switches the
+working tree to it. Idempotent: an existing branch is switched to instead of
+recreated, so re-running a workflow is safe.
+
+```yaml
+- id: create_branch
+  type: git_branch
+  inputs: [task_meta]               # the slug needs the issue summary
+  name: "{task_id}-{slug}"          # default
+  base: main                        # default: defaults.git_base_branch
+  checkout: true                    # default
+```
+
+| Field | Type | Notes |
+|---|---|---|
+| `name` | string | Branch template. `{task_id}` is the issue id; `{slug}` is the issue summary folded to lowercase ASCII, hyphen-separated, cut on a word boundary at 40 chars (`PROJ-12-add-csv-export`). The default matches `defaults.branch_pattern`, so diff-based workflows find the branch later. |
+| `base` | string \| null | Start point for a new branch. Omit to use `defaults.git_base_branch`. |
+| `checkout` | bool | Switch to the branch after creating it. A switch is refused when tracked files have uncommitted changes (untracked files are fine); already being on the target branch always succeeds. |
+
+The action fails when `{slug}` is needed but the summary is missing or
+yields an empty slug, so it never creates a branch like `PROJ-12-`. Under
+`--dry-run` no git command runs. The action's result carries
+`output.branch` / `output.created` for downstream prompts and a one-line
+`output.note` that `yta run` shows in the NOTE column.
+
+#### `write_file`
+
+Writes an upstream action's text output to a file inside the repository,
+optionally committing it on the current branch.
+
+```yaml
+- id: save_plan
+  type: write_file
+  depends_on: [implementation_plan]
+  source: implementation_plan                        # action id providing output.text
+  path: "docs/plans/{task_id}.md"
+  commit_message: "docs: implementation plan for {task_id}"   # omit to leave uncommitted
+```
+
+| Field | Type | Notes |
+|---|---|---|
+| `source` | string | Id of the action whose `output.text` is written (typically an `ai_report`). Fails if that action produced no text. |
+| `path` | string | Relative path inside the repo; `{task_id}` is substituted. Absolute paths and `..` segments are rejected. Parent directories are created. |
+| `commit_message` | string \| null | When set, only this file is staged and committed (`{task_id}` substituted). Other local changes stay untouched. |
+
+Under `--dry-run` nothing is written or committed.
 
 ## OutputSpec
 
@@ -261,6 +321,7 @@ Available variables:
 | Variable | Type | Notes |
 |---|---|---|
 | `ctx.issue` | IssueEvent | `issue_id`, `project`, `event_kind`, `from_state`, `to_state`, `field_name`, `from_value`, `to_value`, `actor`, `timestamp`, `raw` |
+| `ctx.issue_details` | IssueDetails \| None | The issue's own content: `summary`, `description`, `state`. `None` when the YouTrack fetch failed (then `task_meta` is unavailable). Guard with `{% if ctx.issue_details %}`. |
 | `ctx.branch` | str \| None | Branch resolved by `git branch --list <pattern>`. `None` if no branch matched. |
 | `ctx.diff` | str \| None | `git diff --merge-base <base> <branch>`. `None` if branch unresolved or diff failed. Always present in context, but CLI-backend prompts typically ignore it (the agent reads the diff via its own tools). |
 | `ctx.commit_sha` | str \| None | Tip commit of the resolved branch. CLI-backend prompts reference this when telling the agent which commit to inspect. |
@@ -284,8 +345,10 @@ Inspect commit {{ ctx.commit_sha }} on branch {{ ctx.branch }} using
 report — no preamble.
 ```
 
-The repo ships one CLI-style prompt today (`prompts/security_audit_cli.md`)
-as the reference shape to follow. CLI variants of `pages_changed.md` and
+The repo ships two CLI-style prompts as reference shapes:
+`prompts/security_audit_cli.md` (audit a commit) and
+`prompts/implementation_plan.md` (plan-mode: read the issue text, explore
+the tree, output a plan). CLI variants of `pages_changed.md` and
 `qa_plan.md` are a Phase 2 item.
 
 ## Validation
@@ -297,9 +360,54 @@ yta workflows validate -v      # prints each file's pass/fail status
 
 Schema errors are reported with file path + line number where possible.
 
+## Example: the plan-implementation workflow
+
+The second shipped workflow (`workflows/plan-implementation.yaml`) is manual.
+It starts work on a task: branch off, let the agent read the issue and the
+code, and hand you a plan to discuss before anything is implemented.
+
+```yaml
+name: plan-implementation
+trigger:
+  type: manual
+actions:
+  - id: create_branch
+    type: git_branch
+    inputs: [task_meta]
+    name: "{task_id}-{slug}"
+  - id: implementation_plan
+    type: ai_report
+    inputs: [task_meta, dependency_outputs]
+    depends_on: [create_branch]
+    mode: plan
+    output: { kind: comment }
+    prompt: implementation_plan.md
+    model: claude-sonnet-4-6
+  - id: save_plan
+    type: write_file
+    depends_on: [implementation_plan]
+    source: implementation_plan
+    path: "docs/plans/{task_id}.md"
+    commit_message: "docs: implementation plan for {task_id}"
+```
+
+```bash
+cd /path/to/your/repo
+yta run PROJ-12 --workflow=plan-implementation --show-output
+```
+
+What happens: the branch `PROJ-12-<slug-of-summary>` is created from
+`defaults.git_base_branch` and checked out (refused if tracked files have
+uncommitted changes); the agent runs read-only in plan mode with the issue
+summary and description in its prompt; the plan is posted as a comment on
+the issue and committed to `docs/plans/PROJ-12.md` on the new branch;
+`--show-output` also prints it in the terminal. Discuss and refine the plan
+in an interactive `claude` session on that branch. To regenerate after
+editing the issue, re-run with `--force` — the existing branch is reused.
+
 ## Example: the reference workflow
 
-The repo ships one reference workflow (`workflows/ready-for-testing-audit.yaml`)
+The repo ships a reference workflow (`workflows/ready-for-testing-audit.yaml`)
 that exercises every feature above. Three parallel `ai_report` actions, one
 declaring `depends_on` to chain after `pages_changed`, and `on_success`/`on_failure`
 hooks that set an audit-status field. Copy it into your config dir as a

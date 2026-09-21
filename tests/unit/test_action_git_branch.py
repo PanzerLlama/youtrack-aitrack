@@ -169,3 +169,26 @@ async def test_custom_template_without_slug_works_without_details() -> None:
 async def test_default_noop_creator_succeeds_without_io() -> None:
     result = await GitBranchAction(id="b").execute(_ctx())
     assert result.success is True
+
+
+@pytest.mark.asyncio
+async def test_unset_base_uses_injected_default_base() -> None:
+    git = _FakeGit()
+    action = GitBranchAction(id="b", git=git, default_base="develop")
+
+    result = await action.execute(_ctx())
+
+    assert result.success is True
+    assert git.created == [("PROJ-12-add-csv-export", "develop")]
+    assert result.output is not None
+    assert result.output["base"] == "develop"
+
+
+@pytest.mark.asyncio
+async def test_explicit_base_wins_over_default_base() -> None:
+    git = _FakeGit()
+    action = GitBranchAction(id="b", base="release", git=git, default_base="develop")
+
+    await action.execute(_ctx())
+
+    assert git.created == [("PROJ-12-add-csv-export", "release")]

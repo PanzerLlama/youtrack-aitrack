@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import re
 import sys
+from collections.abc import Callable
 from pathlib import Path
 
 import typer
@@ -15,6 +16,7 @@ from youtrack_aitrack.config import (
     InstanceConfigError,
     load_instance_config,
 )
+from youtrack_aitrack.domain.progress import WorkflowSkipped
 from youtrack_aitrack.domain.run import ActionResult, RunReport, RunState
 from youtrack_aitrack.runtime import Runner, build_runner
 
@@ -78,8 +80,11 @@ def run_command(
         stub_llm=stub_llm,
         workflow_names={workflow} if workflow is not None else None,
     )
-    reports = _dispatch(runner, issue_id, force=force, match_triggers=workflow is None)
-    _print_summary(reports)
+    skipped: list[WorkflowSkipped] = []
+    reports = _dispatch(
+        runner, issue_id, force=force, match_triggers=workflow is None, on_skipped=skipped.append
+    )
+    _print_summary(reports, skipped, issue_id=issue_id)
     if show_output:
         _print_outputs(reports)
     if any(r.state is RunState.FAILED for r in reports):
@@ -87,7 +92,12 @@ def run_command(
 
 
 def _dispatch(
-    runner: Runner, issue_id: str, *, force: bool, match_triggers: bool
+    runner: Runner,
+    issue_id: str,
+    *,
+    force: bool,
+    match_triggers: bool,
+    on_skipped: Callable[[WorkflowSkipped], None],
 ) -> list[RunReport]:
     """Run the workflows, showing a live progress region on an interactive TTY.
 
@@ -95,12 +105,23 @@ def _dispatch(
     plainly — the final summary is the persistent record either way.
     """
     if not sys.stdout.isatty():
-        return asyncio.run(runner.run(issue_id, force=force, match_triggers=match_triggers))
-    return asyncio.run(_dispatch_live(runner, issue_id, force=force, match_triggers=match_triggers))
+        return asyncio.run(
+            runner.run(issue_id, force=force, match_triggers=match_triggers, on_skipped=on_skipped)
+        )
+    return asyncio.run(
+        _dispatch_live(
+            runner, issue_id, force=force, match_triggers=match_triggers, on_skipped=on_skipped
+        )
+    )
 
 
 async def _dispatch_live(
-    runner: Runner, issue_id: str, *, force: bool, match_triggers: bool
+    runner: Runner,
+    issue_id: str,
+    *,
+    force: bool,
+    match_triggers: bool,
+    on_skipped: Callable[[WorkflowSkipped], None],
 ) -> list[RunReport]:
     """Drive a rich Live region from the asyncio loop itself.
 
@@ -119,7 +140,11 @@ async def _dispatch_live(
         ticker = asyncio.create_task(tick())
         try:
             reports = await runner.run(
-                issue_id, force=force, match_triggers=match_triggers, on_progress=display.handle
+                issue_id,
+                force=force,
+                match_triggers=match_triggers,
+                on_progress=display.handle,
+                on_skipped=on_skipped,
             )
         finally:
             ticker.cancel()
@@ -128,9 +153,18 @@ async def _dispatch_live(
     return reports
 
 
-def _print_summary(reports: list[RunReport]) -> None:
+def _print_summary(
+    reports: list[RunReport], skipped: list[WorkflowSkipped], *, issue_id: str
+) -> None:
+    for skip in skipped:
+        typer.echo(_format_skip(skip, issue_id))
     if not reports:
-        typer.echo("No matching workflows.")
+        if not skipped:
+            typer.echo("No workflows configured.")
+        elif all(s.reason == "already_dispatched" for s in skipped):
+            typer.echo("Nothing to run: already dispatched. Re-run with --force.")
+        else:
+            typer.echo("No matching workflows.")
         return
     typer.echo(f"{'WORKFLOW':<28} {'ACTION':<28} {'STATE':<8} {'TIME':>8}  NOTE")
     for report in reports:
@@ -139,6 +173,15 @@ def _print_summary(reports: list[RunReport]) -> None:
         for hook in report.hook_results:
             typer.echo(_format_row(report.workflow_name, hook, hook=True))
         typer.echo(f"=== {report.workflow_name}: {report.state.value.upper()}")
+
+
+def _format_skip(skip: WorkflowSkipped, issue_id: str) -> str:
+    if skip.reason == "already_dispatched":
+        return (
+            f"{skip.workflow_name}: already dispatched for {issue_id} "
+            f"(key {skip.idempotency_key}); skipped by idempotency"
+        )
+    return f"{skip.workflow_name}: trigger did not match the issue's current state"
 
 
 def _print_outputs(reports: list[RunReport]) -> None:

@@ -28,3 +28,23 @@ class ProgressEvent(BaseModel):
 
 
 ProgressCallback = Callable[[ProgressEvent], None]
+
+SkipReason = Literal["trigger_mismatch", "already_dispatched"]
+
+
+class WorkflowSkipped(BaseModel):
+    """Why the engine did not run a workflow for an event.
+
+    ``trigger_mismatch``: the trigger rejected the event. ``already_dispatched``:
+    the idempotency store had already seen this (workflow, issue, state, commit).
+    Emitted so the CLI can tell the two apart instead of one opaque "no match".
+    """
+
+    workflow_name: str
+    reason: SkipReason
+    idempotency_key: str | None = None
+
+    model_config = ConfigDict(frozen=True)
+
+
+SkipCallback = Callable[[WorkflowSkipped], None]

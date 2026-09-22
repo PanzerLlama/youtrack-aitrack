@@ -534,3 +534,69 @@ def test_run_bd_issue_dry_run_creates_nothing(
     assert not log.exists()
     assert "created beads issue dry-run" in result.output
     assert not (repo / "docs").exists()
+
+
+@respx.mock(base_url=BASE_URL, assert_all_called=False)
+def test_run_second_dispatch_explains_idempotency_not_no_match(
+    respx_mock: respx.MockRouter, tmp_path: Path
+) -> None:
+    cfg = _make_config(tmp_path)
+    _write_workflow(cfg, "smoke.yaml", SMOKE_WORKFLOW)
+    _mock_state(respx_mock, "DEMO-1", "Ready for testing")
+    _mock_field_metadata(respx_mock)
+    respx_mock.post("/api/issues/DEMO-1").mock(return_value=httpx.Response(200, json={}))
+
+    runner.invoke(app, ["--config-dir", str(cfg), "run", "DEMO-1"])
+    result = runner.invoke(app, ["--config-dir", str(cfg), "run", "DEMO-1"])
+
+    assert result.exit_code == 0, result.output
+    assert "smoke: already dispatched for DEMO-1" in result.output
+    assert "smoke|DEMO-1|Ready for testing|" in result.output
+    assert "Re-run with --force" in result.output
+    assert "No matching workflows" not in result.output
+
+
+@respx.mock(base_url=BASE_URL, assert_all_called=False)
+def test_run_no_match_names_the_workflow_and_reason(
+    respx_mock: respx.MockRouter, tmp_path: Path
+) -> None:
+    cfg = _make_config(tmp_path)
+    _write_workflow(cfg, "smoke.yaml", SMOKE_WORKFLOW)
+    _mock_state(respx_mock, "DEMO-1", "In progress")
+
+    result = runner.invoke(app, ["--config-dir", str(cfg), "run", "DEMO-1"])
+
+    assert result.exit_code == 0, result.output
+    assert "smoke: trigger did not match the issue's current state" in result.output
+    assert "No matching workflows." in result.output
+
+
+@respx.mock(base_url=BASE_URL, assert_all_called=False)
+def test_run_with_workflow_flag_dedup_message_is_explicit(
+    respx_mock: respx.MockRouter, tmp_path: Path
+) -> None:
+    cfg = _make_config(tmp_path)
+    _write_workflow(cfg, "manual.yaml", MANUAL_WORKFLOW)
+    _mock_state(respx_mock, "DEMO-1", "Development in progress")
+    _mock_field_metadata(respx_mock)
+    respx_mock.post("/api/issues/DEMO-1").mock(return_value=httpx.Response(200, json={}))
+    args = ["--config-dir", str(cfg), "run", "DEMO-1", "--workflow", "manual-only"]
+
+    runner.invoke(app, args)
+    result = runner.invoke(app, args)
+
+    assert result.exit_code == 0, result.output
+    assert "manual-only: already dispatched for DEMO-1" in result.output
+    assert "No matching workflows" not in result.output
+
+
+def test_run_no_workflows_configured_message(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    cfg = _make_config(tmp_path)
+    with respx.mock(base_url=BASE_URL, assert_all_called=False) as respx_mock:
+        _mock_state(respx_mock, "DEMO-1", "Ready for testing")
+        result = runner.invoke(app, ["--config-dir", str(cfg), "run", "DEMO-1"])
+
+    assert result.exit_code == 0, result.output
+    assert "No workflows configured." in result.output

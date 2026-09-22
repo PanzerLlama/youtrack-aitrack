@@ -6,7 +6,7 @@ import asyncio
 import time
 from collections.abc import Mapping
 from pathlib import Path
-from typing import cast
+from typing import Literal, cast
 
 from youtrack_aitrack.domain.action import Action, ActionSpec
 from youtrack_aitrack.domain.context import Context
@@ -18,6 +18,8 @@ from youtrack_aitrack.domain.progress import (
     ProgressCallback,
     ProgressEvent,
     ProgressPhase,
+    SkipCallback,
+    WorkflowSkipped,
 )
 from youtrack_aitrack.domain.run import ActionResult, RunReport, RunState
 from youtrack_aitrack.domain.trigger import Trigger
@@ -50,21 +52,26 @@ class WorkflowEngine:
         force: bool = False,
         match_triggers: bool = True,
         on_progress: ProgressCallback | None = None,
+        on_skipped: SkipCallback | None = None,
     ) -> list[RunReport]:
         """Run every workflow whose trigger matches *event*.
 
         ``match_triggers=False`` runs all given workflows regardless of trigger —
         the explicit-selection path (``yta run --workflow=NAME``) where the caller
         has already named the one workflow it wants. Idempotency still applies.
+        Every workflow that does not run is reported through ``on_skipped`` with
+        the reason (trigger mismatch vs. already dispatched).
         """
-        matched = [w for w in workflows if not match_triggers or _trigger_matches(w, event)]
-        if not matched:
-            return []
-        scheduled = [
-            (w, self._key_for(w, event, commit_sha))
-            for w in matched
-            if force or not self._already_processed(w, event, commit_sha)
-        ]
+        scheduled: list[tuple[Workflow, str]] = []
+        for w in workflows:
+            if match_triggers and not _trigger_matches(w, event):
+                _emit_skip(on_skipped, w, "trigger_mismatch")
+                continue
+            key = self._key_for(w, event, commit_sha)
+            if not force and self._already_processed(w, event, commit_sha):
+                _emit_skip(on_skipped, w, "already_dispatched", key)
+                continue
+            scheduled.append((w, key))
         if not scheduled:
             return []
         reports = list(
@@ -168,6 +175,17 @@ class WorkflowEngine:
 
 def _trigger_matches(workflow: Workflow, event: IssueEvent) -> bool:
     return cast(Trigger, workflow.trigger).matches(event)
+
+
+def _emit_skip(
+    on_skipped: SkipCallback | None,
+    workflow: Workflow,
+    reason: Literal["trigger_mismatch", "already_dispatched"],
+    key: str | None = None,
+) -> None:
+    if on_skipped is None:
+        return
+    on_skipped(WorkflowSkipped(workflow_name=workflow.name, reason=reason, idempotency_key=key))
 
 
 async def _execute_graph(

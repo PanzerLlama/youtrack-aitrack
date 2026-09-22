@@ -23,7 +23,7 @@ from youtrack_aitrack.domain.agent_runner import AgentRunner
 from youtrack_aitrack.domain.event import IssueEvent
 from youtrack_aitrack.domain.inputs import GitDiffProvider
 from youtrack_aitrack.domain.issue import IssueDetails
-from youtrack_aitrack.domain.progress import ProgressCallback
+from youtrack_aitrack.domain.progress import ProgressCallback, SkipCallback
 from youtrack_aitrack.domain.run import RunReport
 from youtrack_aitrack.domain.workflow import Workflow
 from youtrack_aitrack.engine import WorkflowEngine
@@ -90,10 +90,16 @@ class Runner:
         *,
         force: bool = False,
         on_progress: ProgressCallback | None = None,
+        on_skipped: SkipCallback | None = None,
     ) -> list[RunReport]:
         details, unavailable = await self._fetch_details(event.issue_id)
         return await self._dispatch(
-            event, details, unavailable, force=force, on_progress=on_progress
+            event,
+            details,
+            unavailable,
+            force=force,
+            on_progress=on_progress,
+            on_skipped=on_skipped,
         )
 
     async def run(
@@ -103,6 +109,7 @@ class Runner:
         force: bool = False,
         match_triggers: bool = True,
         on_progress: ProgressCallback | None = None,
+        on_skipped: SkipCallback | None = None,
     ) -> list[RunReport]:
         details = await self._details.get_issue_details(issue_id)
         event = IssueEvent(
@@ -120,6 +127,7 @@ class Runner:
             force=force,
             match_triggers=match_triggers,
             on_progress=on_progress,
+            on_skipped=on_skipped,
         )
 
     async def _dispatch(
@@ -131,6 +139,7 @@ class Runner:
         force: bool,
         on_progress: ProgressCallback | None,
         match_triggers: bool = True,
+        on_skipped: SkipCallback | None = None,
     ) -> list[RunReport]:
         branch, diff, commit_sha, no_diff = self._resolve_repo_state(event.issue_id)
         reports = await self._engine.dispatch(
@@ -146,6 +155,7 @@ class Runner:
             force=force,
             match_triggers=match_triggers,
             on_progress=on_progress,
+            on_skipped=on_skipped,
         )
         for report in reports:
             self._run_store.save_run(report)

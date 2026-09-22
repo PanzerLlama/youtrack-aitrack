@@ -177,7 +177,9 @@ Symptoms we've seen in practice and what causes them:
 
 | Symptom | Likely cause | Fix |
 |---|---|---|
-| `No matching workflows.` | Issue isn't in the configured `to_state`; or workflow YAML wasn't loaded; or no YAML files in `<config-dir>/workflows/` | Check `yta workflows list`; check issue state in YouTrack matches workflow trigger |
+| `<name>: trigger did not match the issue's current state` + `No matching workflows.` | Issue isn't in the workflow's `to_state` | Move the issue, or name the workflow explicitly with `--workflow=<name>` (bypasses the trigger) |
+| `<name>: already dispatched for <issue> (key …); skipped by idempotency` + `Nothing to run: already dispatched.` | This `(workflow, issue, state, commit)` was dispatched before — `--dry-run` runs count too | Re-run with `--force` |
+| `No workflows configured.` | No YAML files in `<config-dir>/workflows/`, or `--workflow=NAME` matched no file | Check `yta workflows list` |
 | All actions `skipped` with `missing inputs: ['git_diff'] — no branch matching '<task-id>-*' in <path>` | No branch matches `branch_pattern` in that repo — often `yta run` was launched from the wrong directory | Run `git branch --list '<task-id>-*'` there; pass `--repo-dir=PATH` or `cd` to the right repo |
 | All actions `skipped` with `missing inputs: ['git_diff'] — diff against base 'X' failed: ...` | `defaults.git_base_branch` names a branch that doesn't exist in the repo (or the diff itself failed) | Set `defaults.git_base_branch` to the branch your feature branches fork from |
 | `YouTrackError: custom field not found in project 'X': 'Y'` | The field doesn't exist on the project | Create it in YouTrack admin and attach to the project |

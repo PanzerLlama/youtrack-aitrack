@@ -778,3 +778,46 @@ async def test_dispatch_match_triggers_false_runs_non_matching_workflow() -> Non
 
     assert gated == []
     assert [r.workflow_name for r in bypassed] == ["manual-only"]
+
+
+async def test_dispatch_reports_skip_reasons_distinctly() -> None:
+    from youtrack_aitrack.domain.progress import WorkflowSkipped
+
+    store = _InMemoryIdempotencyStore()
+    matching = Workflow(
+        name="matching", trigger=StatusChangeTrigger(to_state="Ready for testing"), actions=[]
+    )
+    other = Workflow(name="other", trigger=StatusChangeTrigger(to_state="Done"), actions=[])
+    engine = WorkflowEngine(idempotency_store=store)
+    seen: list[WorkflowSkipped] = []
+
+    first = await engine.dispatch(_status_change_event(), [matching, other], on_skipped=seen.append)
+    second = await engine.dispatch(
+        _status_change_event(), [matching, other], on_skipped=seen.append
+    )
+
+    assert [r.workflow_name for r in first] == ["matching"]
+    assert second == []
+    assert [(s.workflow_name, s.reason) for s in seen] == [
+        ("other", "trigger_mismatch"),
+        ("matching", "already_dispatched"),
+        ("other", "trigger_mismatch"),
+    ]
+    assert seen[1].idempotency_key is not None
+    assert seen[1].idempotency_key.startswith("matching|")
+    assert seen[0].idempotency_key is None
+
+
+async def test_dispatch_force_emits_no_already_dispatched_skip() -> None:
+    from youtrack_aitrack.domain.progress import WorkflowSkipped
+
+    store = _InMemoryIdempotencyStore()
+    wf = Workflow(name="wf", trigger=StatusChangeTrigger(to_state="Ready for testing"), actions=[])
+    engine = WorkflowEngine(idempotency_store=store)
+    seen: list[WorkflowSkipped] = []
+
+    await engine.dispatch(_status_change_event(), [wf])
+    forced = await engine.dispatch(_status_change_event(), [wf], force=True, on_skipped=seen.append)
+
+    assert len(forced) == 1
+    assert seen == []

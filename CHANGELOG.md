@@ -8,8 +8,47 @@ file before upgrading.
 
 ## [Unreleased]
 
+## [0.3.0b0] — 2026-09-22
+
+This release adds a second reference workflow that runs *before* code
+exists: `plan-implementation` branches off, has the agent study the issue
+and the code read-only, and hands you a plan to discuss. To make that
+possible the engine now carries the issue's own text, workflows can create
+branches and persist files or beads issues, and the CLI agent can run in
+plan mode. The `anthropic_api` SDK backend is removed; `claude_code_cli`
+is the sole execution path (see **Changed** for the one breaking default).
+
 ### Added
 
+- **`plan-implementation` workflow** (`workflows/plan-implementation.yaml`,
+  manual). `yta run <id> --workflow=plan-implementation` creates the branch
+  `<id>-<slug-of-summary>` from `defaults.git_base_branch` and switches to
+  it, runs the agent read-only in plan mode against the issue summary and
+  description, posts the plan as a YouTrack comment, then persists it in the
+  project: as a beads issue (external-ref = the YouTrack id) when the repo
+  has `bd` + `.beads/`, otherwise committed to `docs/plans/<id>.md` on the
+  new branch. Prompt: `prompts/implementation_plan.md`.
+- **Issue text in the context.** `IssueDetails` (summary, description,
+  state) is fetched from YouTrack and exposed as `ctx.issue_details`.
+  `yta run` now makes one GET instead of two; a failed fetch marks
+  `task_meta` unavailable instead of failing the run.
+- **New action types**: `git_branch` (idempotent create-or-switch from a
+  base branch; refuses to switch over uncommitted tracked changes;
+  deterministic `{task_id}-{slug}` naming that matches
+  `defaults.branch_pattern`), `write_file` (persist an upstream action's
+  text inside the repo, optionally committing just that file), `bd_issue`
+  (create a beads issue from an upstream text, with `fallback_path` or a
+  self-skip when beads is unavailable). New adapters:
+  `GitWorkspaceAdapter` (write-side git) and `BeadsCliClient`.
+- **`ai_report.mode: plan`** runs the CLI agent with `--permission-mode
+  plan` (read-only; the final message is the deliverable). `AgentMode` is
+  part of the `AgentRunner` Protocol.
+- **`yta run --workflow=NAME` bypasses trigger matching**, so a
+  `trigger: manual` workflow can finally be fired from the CLI. The poll /
+  daemon path is unchanged. Idempotency still applies.
+- **`yta run --show-output`** prints each action's text output after the
+  summary table; the NOTE column shows a one-line `output.note` for
+  successful actions ("created PROJ-12-… from dev; switched to it").
 - **Live progress for `yta run`**. On an interactive terminal the command now
   shows a live region with each action's state (pending / running / ok / fail /
   skipped) and a per-second elapsed timer, so a multi-minute CLI-agent run no
@@ -41,6 +80,22 @@ file before upgrading.
   `agent: anthropic_api` on any action, must switch to `claude_code_cli`.
 - `anthropic.api_key` is retained but is now only consumed by
   `claude_code_cli` in `cli_agent_mode: bare`; it is unused in `oauth` mode.
+- `task_meta` input semantics: available when the issue text could be
+  fetched (previously "always").
+- Report prompts emit **bold** section labels instead of `##` headings, so a
+  report inside a YouTrack custom field no longer renders larger than the
+  field's own label.
+- `--dry-run` also disables the new git and beads writes.
+
+### Fixed
+
+- `yta run` no longer reports "No matching workflows." when the real reason
+  was idempotency dedup. Every skipped workflow is listed with its reason
+  (trigger mismatch vs. already dispatched, with the idempotency key) and
+  the closing line says what to do ("Re-run with --force").
+- Skip notes for unavailable inputs carry the cause: the branch glob that
+  matched nothing, the ambiguous branch list, or the git error including
+  the base branch name — instead of a bare `missing inputs: ['git_diff']`.
 
 ## [0.2.0b0] — 2026-05-18
 
@@ -182,6 +237,7 @@ verified end-to-end against YouTrack Cloud 2026.1.
 - v1 of `--stub-llm` and `--dry-run` are opt-in. A fresh `yta run` with
   no flags hits Anthropic and writes to YouTrack.
 
-[Unreleased]: https://github.com/PanzerLlama/youtrack-aitrack/compare/v0.2.0b0...HEAD
+[Unreleased]: https://github.com/PanzerLlama/youtrack-aitrack/compare/v0.3.0b0...HEAD
+[0.3.0b0]: https://github.com/PanzerLlama/youtrack-aitrack/compare/v0.2.0b0...v0.3.0b0
 [0.2.0b0]: https://github.com/PanzerLlama/youtrack-aitrack/compare/v0.1.0b0...v0.2.0b0
 [0.1.0b0]: https://github.com/PanzerLlama/youtrack-aitrack/releases/tag/v0.1.0b0

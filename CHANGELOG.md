@@ -8,7 +8,7 @@ file before upgrading.
 
 ## [Unreleased]
 
-## [0.3.0b0] — 2026-09-22
+## [0.3.0b0] — 2026-10-16
 
 This release adds a second reference workflow that runs *before* code
 exists: `plan-implementation` branches off, has the agent study the issue

@@ -37,6 +37,10 @@ class AgentResult(BaseModel):
     exit_code: int
     duration_s: float
     model_used: str | None = None
+    # Usage, when the backend reports it. input_tokens includes cache reads/writes.
+    input_tokens: int | None = None
+    output_tokens: int | None = None
+    cost_usd: float | None = None
 
 
 class AgentRunnerError(Exception):

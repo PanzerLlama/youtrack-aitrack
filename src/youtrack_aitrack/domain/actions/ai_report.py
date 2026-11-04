@@ -99,8 +99,11 @@ class AiReportAction(ActionSpec):
             )
         except AgentRunnerError as exc:
             return ActionResult(action_id=self.id, success=False, error=_format_error(exc))
-        return ActionResult(
-            action_id=self.id,
-            success=True,
-            output={"text": result.output, "model": result.model_used or self.model},
-        )
+        output: dict[str, Any] = {"text": result.output, "model": result.model_used or self.model}
+        usage = {
+            "input_tokens": result.input_tokens,
+            "output_tokens": result.output_tokens,
+            "cost_usd": result.cost_usd,
+        }
+        output.update({k: v for k, v in usage.items() if v is not None})
+        return ActionResult(action_id=self.id, success=True, output=output)

@@ -8,6 +8,22 @@ from youtrack_aitrack.domain.progress import WorkflowSkipped
 from youtrack_aitrack.domain.run import ActionResult, RunReport
 
 
+def print_repo_state(reports: list[RunReport], *, issue_id: str, pattern: str) -> None:
+    """One line naming the branch and commit the run operated on (same for every report)."""
+    if not reports:
+        return
+    first = reports[0]
+    if first.branch is None:
+        glob = pattern.replace("{task_id}", issue_id)
+        typer.echo(
+            f"branch: none (pattern {glob!r}); actions needing git_diff skip. "
+            "Wrong repo? pass --repo-dir"
+        )
+        return
+    sha = f" @ {first.commit_sha[:10]}" if first.commit_sha else ""
+    typer.echo(f"branch: {first.branch}{sha}")
+
+
 def print_summary(
     reports: list[RunReport], skipped: list[WorkflowSkipped], *, issue_id: str
 ) -> None:

@@ -46,12 +46,20 @@ skipped) with a running elapsed timer, so a multi-minute CLI-agent run never
 looks hung. The live region clears on completion, leaving a final summary:
 
 ```
+repo: /home/me/src/shop (cwd; pass --repo-dir to override)
+branch: PROJ-12-add-csv-export @ 4f3a9c1b2d
 WORKFLOW                     ACTION              STATE     TIME  NOTE
 ready-for-testing-audit      security_audit      ok       1m02s
 ready-for-testing-audit      pages_changed       ok       48.0s
 ready-for-testing-audit      qa_plan             ok       55.4s
 === ready-for-testing-audit: DONE
 ```
+
+The `repo:` line is printed before dispatch so a wrong working directory is
+visible even when nothing runs. When no branch matches the issue, the
+`branch:` line says so and names the pattern tried; every action that needs
+`git_diff` then skips with the same reason in `NOTE`. The resolved repo,
+branch and commit are also stored on the run report under `runs/`.
 
 The `TIME` column is each action's wall-clock duration. When stdout is not a
 terminal (pipes, CI, the daemon), the live region is skipped and only the

@@ -12,7 +12,7 @@ import typer
 from rich.live import Live
 
 from youtrack_aitrack.cli.progress import ProgressDisplay
-from youtrack_aitrack.cli.run_summary import print_outputs, print_summary
+from youtrack_aitrack.cli.run_summary import print_outputs, print_repo_state, print_summary
 from youtrack_aitrack.config import (
     InstanceConfigError,
     WorkflowParseError,
@@ -97,6 +97,7 @@ def run_command(
     except WorkflowParseError as exc:
         raise typer.BadParameter(str(exc)) from exc
     skipped: list[WorkflowSkipped] = []
+    _print_repo_line(repo_dir)
     try:
         reports = _dispatch(
             runner,
@@ -108,11 +109,21 @@ def run_command(
         )
     except ValueError as exc:  # unknown --action id, raised before any I/O
         raise typer.BadParameter(str(exc)) from exc
+    print_repo_state(reports, issue_id=issue_id, pattern=config.defaults.branch_pattern)
     print_summary(reports, skipped, issue_id=issue_id)
     if show_output:
         print_outputs(reports)
     if any(r.state is RunState.FAILED for r in reports):
         raise typer.Exit(code=1)
+
+
+def _print_repo_line(repo_dir: Path | None) -> None:
+    """Always show which repo the run inspects: a silent cwd default is the usual
+    reason every git_diff action skips with 'missing inputs'."""
+    if repo_dir is None:
+        typer.echo(f"repo: {Path.cwd()} (cwd; pass --repo-dir to override)")
+    else:
+        typer.echo(f"repo: {repo_dir.resolve()}")
 
 
 def _dispatch(

@@ -231,3 +231,19 @@ def test_load_run_ignores_idempotency_dotfile(tmp_path: Path) -> None:
     store = JsonRunStore(tmp_path)
     store.mark_processed("k", "r")
     assert store.load_run("anything") is None
+
+
+def test_round_trip_preserves_resolved_repo_state(tmp_path: Path) -> None:
+    store = JsonRunStore(tmp_path)
+    report = RunReport(
+        run_id="repo-state",
+        workflow_name="audit",
+        state=RunState.DONE,
+        repo_dir=Path("/work/shop"),
+        branch="PROJ-12-x",
+        commit_sha="abc123",
+    )
+    store.save_run(report)
+    loaded = store.load_run("repo-state")
+    assert loaded == report
+    assert loaded is not None and loaded.repo_dir == Path("/work/shop")

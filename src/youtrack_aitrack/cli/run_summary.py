@@ -37,13 +37,26 @@ def print_summary(
         else:
             typer.echo("No matching workflows.")
         return
-    typer.echo(f"{'WORKFLOW':<28} {'ACTION':<28} {'STATE':<8} {'TIME':>8}  NOTE")
+    typer.echo(
+        f"{'WORKFLOW':<28} {'ACTION':<28} {'STATE':<8} {'TIME':>8} {'TOKENS':>12} {'COST':>8}  NOTE"
+    )
     for report in reports:
         for result in report.action_results:
             typer.echo(_format_row(report.workflow_name, result, hook=False))
         for hook in report.hook_results:
             typer.echo(_format_row(report.workflow_name, hook, hook=True))
-        typer.echo(f"=== {report.workflow_name}: {report.state.value.upper()}")
+        typer.echo(f"=== {report.workflow_name}: {report.state.value.upper()}{_total_cost(report)}")
+
+
+def _total_cost(report: RunReport) -> str:
+    costs = [_cost_of(r) for r in [*report.action_results, *report.hook_results]]
+    known = [c for c in costs if c is not None]
+    return f" (cost ${sum(known):.4f})" if known else ""
+
+
+def _cost_of(result: ActionResult) -> float | None:
+    cost = (result.output or {}).get("cost_usd")
+    return float(cost) if isinstance(cost, int | float) else None
 
 
 def _format_skip(skip: WorkflowSkipped, issue_id: str) -> str:
@@ -71,7 +84,30 @@ def _format_row(workflow_name: str, result: ActionResult, *, hook: bool) -> str:
         note += " (see run report for full error)"
     label = f"{result.action_id} (hook)" if hook else result.action_id
     time_col = _fmt_duration_ms(result.duration_ms)
-    return f"{workflow_name:<28} {label:<28} {state:<8} {time_col:>8}  {note}"
+    tokens_col = _fmt_tokens(result)
+    cost = _cost_of(result)
+    cost_col = f"${cost:.4f}" if cost is not None else ""
+    return (
+        f"{workflow_name:<28} {label:<28} {state:<8} {time_col:>8} "
+        f"{tokens_col:>12} {cost_col:>8}  {note}"
+    )
+
+
+def _fmt_tokens(result: ActionResult) -> str:
+    """``in/out`` token counts when the backend reported them, e.g. ``23.2k/412``."""
+    out = result.output or {}
+    tokens_in, tokens_out = out.get("input_tokens"), out.get("output_tokens")
+    if not isinstance(tokens_in, int) or not isinstance(tokens_out, int):
+        return ""
+    return f"{_fmt_count(tokens_in)}/{_fmt_count(tokens_out)}"
+
+
+def _fmt_count(n: int) -> str:
+    if n < 1000:
+        return str(n)
+    if n < 1_000_000:
+        return f"{n / 1000:.1f}k"
+    return f"{n / 1_000_000:.2f}M"
 
 
 def _success_note(result: ActionResult) -> str:

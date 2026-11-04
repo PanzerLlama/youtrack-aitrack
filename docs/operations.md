@@ -48,11 +48,11 @@ looks hung. The live region clears on completion, leaving a final summary:
 ```
 repo: /home/me/src/shop (cwd; pass --repo-dir to override)
 branch: PROJ-12-add-csv-export @ 4f3a9c1b2d
-WORKFLOW                     ACTION              STATE     TIME  NOTE
-ready-for-testing-audit      security_audit      ok       1m02s
-ready-for-testing-audit      pages_changed       ok       48.0s
-ready-for-testing-audit      qa_plan             ok       55.4s
-=== ready-for-testing-audit: DONE
+WORKFLOW                     ACTION              STATE     TIME       TOKENS     COST  NOTE
+ready-for-testing-audit      security_audit      ok       1m02s   41.3k/1.2k  $0.1842
+ready-for-testing-audit      pages_changed       ok       48.0s   38.9k/0.6k  $0.1511
+ready-for-testing-audit      qa_plan             ok       55.4s   40.1k/1.9k  $0.1790
+=== ready-for-testing-audit: DONE (cost $0.5143)
 ```
 
 The `repo:` line is printed before dispatch so a wrong working directory is
@@ -61,7 +61,14 @@ visible even when nothing runs. When no branch matches the issue, the
 `git_diff` then skips with the same reason in `NOTE`. The resolved repo,
 branch and commit are also stored on the run report under `runs/`.
 
-The `TIME` column is each action's wall-clock duration. When stdout is not a
+The `TIME` column is each action's wall-clock duration. `TOKENS` is
+`input/output` as reported by the agent backend, where input includes prompt
+cache writes and reads (the raw uncached figure is a handful of tokens on a
+cached session). `COST` is the backend's own USD estimate; the `===` line sums
+it per workflow. Both columns are blank for `--stub-llm` runs and for backends
+that do not report usage. The same numbers are stored on the run report under
+`runs/` as `input_tokens`, `output_tokens`, `cost_usd` in each action's output.
+When stdout is not a
 terminal (pipes, CI, the daemon), the live region is skipped and only the
 final summary prints — so logs stay clean.
 

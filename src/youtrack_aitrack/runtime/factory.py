@@ -53,6 +53,32 @@ class NoOpBranchCreator:
         return None
 
 
+class DryRunBranchCreator:
+    """Dry-run BranchCreator — reads the real repo state, creates and switches nothing.
+
+    Real reads let the action predict accurately: 'would reuse X' when X exists,
+    and the dirty-tree refusal fires exactly as it would on a real run.
+    """
+
+    def __init__(self, real: BranchCreator) -> None:
+        self._real = real
+
+    def current_branch(self, repo_dir: Path) -> str | None:
+        return self._real.current_branch(repo_dir)
+
+    def has_branch(self, repo_dir: Path, name: str) -> bool:
+        return self._real.has_branch(repo_dir, name)
+
+    def is_clean(self, repo_dir: Path) -> bool:
+        return self._real.is_clean(repo_dir)
+
+    def create_branch(self, repo_dir: Path, name: str, *, base: str) -> None:
+        return None
+
+    def switch(self, repo_dir: Path, name: str) -> None:
+        return None
+
+
 class NoOpRepoFileWriter:
     """Dry-run RepoFileWriter — accepts writes and commits, touches nothing."""
 
@@ -144,6 +170,7 @@ class ActionFactory:
         file_writer: RepoFileWriter | None = None,
         git_base_branch: str = "main",
         issue_tracker: IssueTrackerClient | None = None,
+        dry_run: bool = False,
     ) -> None:
         if default_agent not in agents:
             raise ValueError(
@@ -159,6 +186,7 @@ class ActionFactory:
         self._file_writer = file_writer or NoOpRepoFileWriter()
         self._git_base_branch = git_base_branch
         self._issue_tracker = issue_tracker
+        self._dry_run = dry_run
 
     def materialize(self, spec: ActionSpec) -> ActionSpec:
         data = spec.model_dump()
@@ -183,12 +211,20 @@ class ActionFactory:
                 return YtCommentAction(**data, poster=self._poster)
             case "git_branch":
                 return GitBranchAction(
-                    **data, git=self._branch_creator, default_base=self._git_base_branch
+                    **data,
+                    git=self._branch_creator,
+                    default_base=self._git_base_branch,
+                    dry_run=self._dry_run,
                 )
             case "write_file":
-                return WriteFileAction(**data, writer=self._file_writer)
+                return WriteFileAction(**data, writer=self._file_writer, dry_run=self._dry_run)
             case "bd_issue":
-                return BdIssueAction(**data, tracker=self._issue_tracker, writer=self._file_writer)
+                return BdIssueAction(
+                    **data,
+                    tracker=self._issue_tracker,
+                    writer=self._file_writer,
+                    dry_run=self._dry_run,
+                )
             case _:
                 return spec
 

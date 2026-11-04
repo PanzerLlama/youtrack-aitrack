@@ -319,3 +319,60 @@ def test_materialize_bd_issue_injects_tracker_and_file_writer() -> None:
     assert materialized._writer is file_writer
     assert tracker.is_available(Path("/r")) is True
     assert tracker.create_issue(Path("/r"), None) == "dry-run"  # type: ignore[arg-type]
+
+
+def test_dry_run_branch_creator_reads_real_state_but_never_writes() -> None:
+    from youtrack_aitrack.runtime.factory import DryRunBranchCreator
+
+    class _Real:
+        def __init__(self) -> None:
+            self.writes: list[str] = []
+
+        def current_branch(self, repo_dir: Path) -> str | None:
+            return "dev"
+
+        def has_branch(self, repo_dir: Path, name: str) -> bool:
+            return name == "existing"
+
+        def is_clean(self, repo_dir: Path) -> bool:
+            return False
+
+        def create_branch(self, repo_dir: Path, name: str, *, base: str) -> None:
+            self.writes.append(f"create {name}")
+
+        def switch(self, repo_dir: Path, name: str) -> None:
+            self.writes.append(f"switch {name}")
+
+    real = _Real()
+    creator = DryRunBranchCreator(real)
+    assert creator.current_branch(Path("/r")) == "dev"
+    assert creator.has_branch(Path("/r"), "existing") is True
+    assert creator.has_branch(Path("/r"), "other") is False
+    assert creator.is_clean(Path("/r")) is False
+    creator.create_branch(Path("/r"), "x", base="dev")
+    creator.switch(Path("/r"), "x")
+    assert real.writes == []
+
+
+def test_factory_dry_run_flag_reaches_git_actions() -> None:
+    from youtrack_aitrack.domain.actions.bd_issue import BdIssueAction
+    from youtrack_aitrack.domain.actions.git_branch import GitBranchAction
+    from youtrack_aitrack.domain.actions.write_file import WriteFileAction
+
+    factory = ActionFactory(
+        agents={"claude_code_cli": _FakeAgentRunner("cli")},
+        default_agent="claude_code_cli",
+        renderer=_FakeRenderer(),
+        writer=_FakeWriter(),
+        poster=_FakePoster(),
+        dry_run=True,
+    )
+    branch = cast(GitBranchAction, factory.materialize(GitBranchAction(id="b")))
+    write = cast(
+        WriteFileAction, factory.materialize(WriteFileAction(id="w", source="p", path="x"))
+    )
+    track = cast(BdIssueAction, factory.materialize(BdIssueAction(id="t", source="p")))
+    assert branch._dry_run is True
+    assert write._dry_run is True
+    assert track._dry_run is True
+    assert cast(GitBranchAction, _factory().materialize(GitBranchAction(id="b")))._dry_run is False

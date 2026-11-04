@@ -277,3 +277,40 @@ async def test_ai_report_defaults_to_default_mode_and_passes_plan_mode() -> None
 def test_ai_report_rejects_unknown_mode() -> None:
     with pytest.raises(ValidationError):
         AiReportAction(id="a", prompt="p.md", model="m", mode="yolo")  # type: ignore[arg-type]
+
+
+class _UsageRunner:
+    async def run(
+        self,
+        prompt: str,
+        *,
+        cwd: Path,
+        commit_sha: str | None,
+        timeout_s: float,
+        model: str | None = None,
+        mode: str = "default",
+    ) -> AgentResult:
+        return AgentResult(
+            output="report",
+            exit_code=0,
+            duration_s=1.0,
+            model_used=model,
+            input_tokens=23153,
+            output_tokens=4,
+            cost_usd=0.00237653,
+        )
+
+
+@pytest.mark.asyncio
+async def test_ai_report_surfaces_usage_when_backend_reports_it() -> None:
+    a = AiReportAction(id="a1", prompt="p", model="m", runner=_UsageRunner())
+
+    result = await a.execute(_ctx())
+
+    assert result.output == {
+        "text": "report",
+        "model": "m",
+        "input_tokens": 23153,
+        "output_tokens": 4,
+        "cost_usd": 0.00237653,
+    }

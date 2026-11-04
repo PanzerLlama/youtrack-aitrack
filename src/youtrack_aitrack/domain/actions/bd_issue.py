@@ -17,6 +17,8 @@ from youtrack_aitrack.domain.action import ActionSpec
 from youtrack_aitrack.domain.actions.write_file import (
     NoOpRepoFileWriter,
     RepoFileWriter,
+    dry_run_prefix,
+    file_note,
     safe_relative_path,
 )
 from youtrack_aitrack.domain.context import Context
@@ -65,17 +67,20 @@ class BdIssueAction(ActionSpec):
 
     _tracker: IssueTrackerClient = PrivateAttr()
     _writer: RepoFileWriter = PrivateAttr()
+    _dry_run: bool = PrivateAttr()
 
     def __init__(
         self,
         *,
         tracker: IssueTrackerClient | None = None,
         writer: RepoFileWriter | None = None,
+        dry_run: bool = False,
         **data: Any,
     ) -> None:
         super().__init__(**data)
         self._tracker = tracker if tracker is not None else _NoOpIssueTracker()
         self._writer = writer if writer is not None else NoOpRepoFileWriter()
+        self._dry_run = dry_run
 
     async def execute(self, ctx: Context) -> ActionResult:
         text = _source_text(ctx, self.source)
@@ -106,15 +111,16 @@ class BdIssueAction(ActionSpec):
             external_ref=_fill(self.external_ref, ctx) if self.external_ref else None,
         )
         issue_id = self._tracker.create_issue(repo, issue)
+        if self._dry_run:
+            note = "[dry-run] would create beads issue"
+            text = "Implementation plan would be tracked in beads."
+        else:
+            note = f"created beads issue {issue_id}"
+            text = f"Implementation plan tracked in beads as {issue_id}."
         return ActionResult(
             action_id=self.id,
             success=True,
-            output={
-                "tracker": "beads",
-                "issue_id": issue_id,
-                "note": f"created beads issue {issue_id}",
-                "text": f"Implementation plan tracked in beads as {issue_id}.",
-            },
+            output={"tracker": "beads", "issue_id": issue_id, "note": note, "text": text},
         )
 
     def _fallback(self, ctx: Context, repo: Path, text: str) -> ActionResult:
@@ -127,7 +133,12 @@ class BdIssueAction(ActionSpec):
         sha: str | None = None
         if self.fallback_commit_message is not None:
             sha = self._writer.commit_paths(repo, [rel], _fill(self.fallback_commit_message, ctx))
-        note = f"beads unavailable; wrote {rel}" + (f"; committed {sha[:10]}" if sha else "")
+        commit = self.fallback_commit_message is not None
+        note = (
+            dry_run_prefix(self._dry_run)
+            + "beads unavailable; "
+            + file_note(rel, sha, commit=commit, dry_run=self._dry_run)
+        )
         return ActionResult(
             action_id=self.id,
             success=True,

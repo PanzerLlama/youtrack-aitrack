@@ -164,6 +164,7 @@ A few options can be overridden per-invocation without editing config:
 | `--repo-dir PATH` | current working directory as git repo root | `run`, `poll` |
 | `--interval-seconds N` | `defaults.poll_interval_seconds` | `poll --daemon` only |
 | `--workflow NAME` | restricts to one workflow file | `run` |
+| `--action ID` | restricts to one action (repeatable) plus its `depends_on` chain; skips hooks | `run` (with `--workflow`) |
 | `--dry-run`, `--stub-llm`, `--force` | safety modifiers | `run`, `poll` |
 
 ## Validating your config

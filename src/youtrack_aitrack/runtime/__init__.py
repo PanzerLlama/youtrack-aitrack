@@ -1,16 +1,14 @@
 """Runtime composition layer — wires adapters into engine + actions."""
 
-from youtrack_aitrack.runtime.factory import (
-    ActionFactory,
+from youtrack_aitrack.runtime.dry_run import (
     DryRunBranchCreator,
     DryRunIssueTracker,
     NoOpBranchCreator,
     NoOpCommentPoster,
     NoOpFieldWriter,
     NoOpRepoFileWriter,
-    StandardOutputSink,
-    StubAgentRunner,
 )
+from youtrack_aitrack.runtime.factory import ActionFactory, StandardOutputSink, StubAgentRunner
 from youtrack_aitrack.runtime.poller import (
     IssueTagsLookup,
     Poller,

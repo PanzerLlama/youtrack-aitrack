@@ -74,7 +74,7 @@ def run_command(
             f"invalid issue id {issue_id!r}; expected <PROJECT>-<NUMBER>, e.g. DEMO-42"
         )
     if action and workflow is None:
-        raise typer.BadParameter("--action requires --workflow to name the workflow it belongs to")
+        raise typer.BadParameter("--action requires --workflow")
     config_dir: Path = ctx.obj["config_dir"]
     config_yaml = config_dir / "config.yaml"
     if not config_yaml.is_file():

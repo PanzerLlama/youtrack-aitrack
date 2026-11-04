@@ -8,6 +8,51 @@ file before upgrading.
 
 ## [Unreleased]
 
+Iterating on a single report is now cheap and visible: re-run one action
+instead of the whole workflow, see what it cost, and see which repo and
+branch the run actually inspected.
+
+### Added
+
+- **`yta run --action ID`** (repeatable) re-runs only the named action(s).
+  The selection is expanded to its transitive `depends_on` chain, so
+  `--action qa_plan` regenerates `pages_changed` first and the downstream
+  report sees fresh upstream output. Workflow `on_success` / `on_failure`
+  hooks are skipped on a partial run. Requires `--workflow`; an unknown id
+  fails before any I/O and lists the valid ids. Pure helper:
+  `select_actions` in `domain/workflow.py`.
+- **Per-action tokens and USD cost.** The `claude_code_cli` backend now
+  spawns `claude -p --output-format json` and reads the result envelope.
+  `AgentResult` gains optional `input_tokens`, `output_tokens`, `cost_usd`;
+  `ai_report` stores them in its output; the `yta run` summary gains
+  `TOKENS` (`in/out`, input includes prompt-cache writes and reads) and
+  `COST` columns plus a per-workflow total on the `===` line. Blank for
+  `--stub-llm` and for backends that do not report usage.
+- **`yta run` prints the repo and branch it operates on**: `repo: <path>
+  (cwd; pass --repo-dir to override)` before dispatch, then `branch: <name>
+  @ <sha>` or `branch: none (pattern '…'); … Wrong repo? pass --repo-dir`
+  before the summary table. `RunReport` persists `repo_dir`, `branch`,
+  `commit_sha` so a stored run is self-describing.
+
+### Fixed
+
+- **`--dry-run` notes no longer claim side effects.** `git_branch`,
+  `write_file` and `bd_issue` report `[dry-run] would create …` / `would
+  write …` / `would create beads issue`. The dry-run branch adapter reads
+  the real repo state, so "would reuse <branch>" and the dirty-tree refusal
+  are accurate while create/switch stay no-ops.
+- **`yta run` / `yta poll` show a one-line error** instead of a traceback
+  when a workflow YAML fails to parse (for example an action type unknown to
+  an older installed version).
+- The Claude CLI runner raises `AgentRunnerError` with the envelope's
+  `subtype` when the CLI reports `is_error` on a zero exit code.
+
+### Internal
+
+- Dry-run adapters moved from `runtime/factory.py` to `runtime/dry_run.py`;
+  `yta run` summary rendering moved to `cli/run_summary.py`; the JSON
+  envelope contract lives in `adapters/cli/envelope.py`.
+
 ## [0.3.0b0] — 2026-10-16
 
 This release adds a second reference workflow that runs *before* code

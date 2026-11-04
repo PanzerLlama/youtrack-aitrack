@@ -411,6 +411,8 @@ def test_run_branch_workflow_dry_run_touches_nothing(
 
     assert result.exit_code == 0, result.output
     assert "DONE" in result.output
+    assert "[dry-run] would create DEMO-1-add-csv-export from main" in result.output
+    assert "[dry-run] would write docs/plans/DEMO-1.md" in result.output
     assert _git(["branch", "--show-current"], repo) == "main"
     assert _git(["branch", "--list"], repo).split() == ["*", "main"]
     assert not (repo / "docs").exists()
@@ -532,7 +534,7 @@ def test_run_bd_issue_dry_run_creates_nothing(
 
     assert result.exit_code == 0, result.output
     assert not log.exists()
-    assert "created beads issue dry-run" in result.output
+    assert "[dry-run] would create beads issue" in result.output
     assert not (repo / "docs").exists()
 
 

@@ -31,8 +31,8 @@ from youtrack_aitrack.engine.idempotency import IdempotencyStore
 from youtrack_aitrack.engine.run_store import RunStore
 from youtrack_aitrack.runtime.factory import (
     ActionFactory,
+    DryRunBranchCreator,
     DryRunIssueTracker,
-    NoOpBranchCreator,
     NoOpCommentPoster,
     NoOpFieldWriter,
     NoOpRepoFileWriter,
@@ -227,10 +227,11 @@ def wire(
         writer=writer,
         poster=poster,
         agent_timeout_seconds=float(config.defaults.agent_timeout_seconds),
-        branch_creator=NoOpBranchCreator() if dry_run else workspace,
+        branch_creator=DryRunBranchCreator(workspace) if dry_run else workspace,
         file_writer=NoOpRepoFileWriter() if dry_run else workspace,
         git_base_branch=config.defaults.git_base_branch,
         issue_tracker=DryRunIssueTracker(beads) if dry_run else beads,
+        dry_run=dry_run,
     )
     workflows = [
         factory.materialize_workflow(w) for w in _load_workflows(config, config_dir, workflow_names)

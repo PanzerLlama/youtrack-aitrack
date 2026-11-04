@@ -240,7 +240,7 @@ async def test_standard_output_sink_comment_writes_via_comment_poster() -> None:
 
 def test_materialize_git_branch_injects_creator_and_default_base() -> None:
     from youtrack_aitrack.domain.actions.git_branch import GitBranchAction
-    from youtrack_aitrack.runtime.factory import NoOpBranchCreator
+    from youtrack_aitrack.runtime.dry_run import NoOpBranchCreator
 
     creator = NoOpBranchCreator()
     factory = ActionFactory(
@@ -263,7 +263,7 @@ def test_materialize_git_branch_injects_creator_and_default_base() -> None:
 
 def test_materialize_write_file_injects_writer() -> None:
     from youtrack_aitrack.domain.actions.write_file import WriteFileAction
-    from youtrack_aitrack.runtime.factory import NoOpRepoFileWriter
+    from youtrack_aitrack.runtime.dry_run import NoOpRepoFileWriter
 
     file_writer = NoOpRepoFileWriter()
     factory = ActionFactory(
@@ -284,7 +284,7 @@ def test_materialize_write_file_injects_writer() -> None:
 
 def test_factory_defaults_to_noop_git_adapters() -> None:
     from youtrack_aitrack.domain.actions.git_branch import GitBranchAction
-    from youtrack_aitrack.runtime.factory import NoOpBranchCreator
+    from youtrack_aitrack.runtime.dry_run import NoOpBranchCreator
 
     materialized = cast(GitBranchAction, _factory().materialize(GitBranchAction(id="b")))
     assert isinstance(materialized._git, NoOpBranchCreator)
@@ -292,7 +292,7 @@ def test_factory_defaults_to_noop_git_adapters() -> None:
 
 def test_materialize_bd_issue_injects_tracker_and_file_writer() -> None:
     from youtrack_aitrack.domain.actions.bd_issue import BdIssueAction
-    from youtrack_aitrack.runtime.factory import DryRunIssueTracker, NoOpRepoFileWriter
+    from youtrack_aitrack.runtime.dry_run import DryRunIssueTracker, NoOpRepoFileWriter
 
     class _Tracker:
         def is_available(self, repo_dir: Path) -> bool:
@@ -322,7 +322,7 @@ def test_materialize_bd_issue_injects_tracker_and_file_writer() -> None:
 
 
 def test_dry_run_branch_creator_reads_real_state_but_never_writes() -> None:
-    from youtrack_aitrack.runtime.factory import DryRunBranchCreator
+    from youtrack_aitrack.runtime.dry_run import DryRunBranchCreator
 
     class _Real:
         def __init__(self) -> None:

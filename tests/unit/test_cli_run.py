@@ -750,3 +750,63 @@ def test_run_unknown_action_id_lists_available_ids(
     assert "['nope']" in _plain(result.output)
     assert "'pages', 'qa', 'audit'" in _plain(result.output)
     assert not state_route.called
+
+
+@respx.mock(base_url=BASE_URL, assert_all_called=False)
+def test_run_prints_cwd_repo_line_and_no_branch_hint(
+    respx_mock: respx.MockRouter, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    cfg = _make_config(tmp_path)
+    _write_workflow(cfg, "ai.yaml", AI_WORKFLOW)
+    _write_prompt(cfg, "smoke.md", SMOKE_PROMPT)
+    _mock_state(respx_mock, "DEMO-1", "Ready for testing")
+    repo = tmp_path / "elsewhere"
+    _init_repo(repo)
+    monkeypatch.chdir(repo)
+
+    result = runner.invoke(
+        app, ["--config-dir", str(cfg), "run", "DEMO-1", "--dry-run", "--stub-llm"]
+    )
+
+    assert result.exit_code == 0, result.output
+    lines = result.output.splitlines()
+    assert lines[0] == f"repo: {repo.resolve()} (cwd; pass --repo-dir to override)"
+    assert lines[1].startswith("branch: none (pattern 'DEMO-1-*')")
+    assert "pass --repo-dir" in lines[1]
+    assert lines[2].startswith("WORKFLOW")
+
+
+@respx.mock(base_url=BASE_URL, assert_all_called=False)
+def test_run_prints_explicit_repo_and_resolved_branch(
+    respx_mock: respx.MockRouter, tmp_path: Path
+) -> None:
+    cfg = _make_config(tmp_path)
+    _write_workflow(cfg, "ai.yaml", AI_WORKFLOW)
+    _write_prompt(cfg, "smoke.md", SMOKE_PROMPT)
+    _mock_state(respx_mock, "DEMO-1", "Ready for testing")
+    repo = tmp_path / "repo"
+    _init_repo(repo)
+    _git(["checkout", "-q", "-b", "DEMO-1-feature"], repo)
+    (repo / "f.txt").write_text("x\n")
+    _git(["add", "f.txt"], repo)
+    _git(["commit", "-q", "-m", "feat"], repo)
+    sha = _git(["rev-parse", "HEAD"], repo)
+
+    result = runner.invoke(
+        app,
+        [
+            "--config-dir",
+            str(cfg),
+            "run",
+            "DEMO-1",
+            "--dry-run",
+            "--stub-llm",
+            "--repo-dir",
+            str(repo),
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    lines = result.output.splitlines()
+    assert lines[0] == f"repo: {repo.resolve()}"
+    assert lines[1] == f"branch: DEMO-1-feature @ {sha[:10]}"

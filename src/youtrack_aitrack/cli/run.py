@@ -14,6 +14,7 @@ from rich.live import Live
 from youtrack_aitrack.cli.progress import ProgressDisplay
 from youtrack_aitrack.config import (
     InstanceConfigError,
+    WorkflowParseError,
     load_instance_config,
 )
 from youtrack_aitrack.domain.progress import WorkflowSkipped
@@ -72,14 +73,17 @@ def run_command(
     except InstanceConfigError as exc:
         raise typer.BadParameter(str(exc)) from exc
 
-    runner = build_runner(
-        config,
-        config_dir,
-        repo_dir=repo_dir,
-        dry_run=dry_run,
-        stub_llm=stub_llm,
-        workflow_names={workflow} if workflow is not None else None,
-    )
+    try:
+        runner = build_runner(
+            config,
+            config_dir,
+            repo_dir=repo_dir,
+            dry_run=dry_run,
+            stub_llm=stub_llm,
+            workflow_names={workflow} if workflow is not None else None,
+        )
+    except WorkflowParseError as exc:
+        raise typer.BadParameter(str(exc)) from exc
     skipped: list[WorkflowSkipped] = []
     reports = _dispatch(
         runner, issue_id, force=force, match_triggers=workflow is None, on_skipped=skipped.append

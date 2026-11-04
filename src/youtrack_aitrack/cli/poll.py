@@ -9,7 +9,7 @@ from pathlib import Path
 
 import typer
 
-from youtrack_aitrack.config import InstanceConfigError, load_instance_config
+from youtrack_aitrack.config import InstanceConfigError, WorkflowParseError, load_instance_config
 from youtrack_aitrack.runtime import Poller, PollResult, build_poller
 
 _DAEMON_OPTION = typer.Option(False, "--daemon", help="Loop forever, sleeping between polls.")
@@ -56,7 +56,12 @@ def poll_command(
     except InstanceConfigError as exc:
         raise typer.BadParameter(str(exc)) from exc
 
-    poller = build_poller(config, config_dir, repo_dir=repo_dir, dry_run=dry_run, stub_llm=stub_llm)
+    try:
+        poller = build_poller(
+            config, config_dir, repo_dir=repo_dir, dry_run=dry_run, stub_llm=stub_llm
+        )
+    except WorkflowParseError as exc:
+        raise typer.BadParameter(str(exc)) from exc
     if not daemon:
         result = asyncio.run(poller.poll_once())
         _print_result(result)

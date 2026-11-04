@@ -76,7 +76,7 @@ Every Protocol from `domain/` is satisfied by exactly one adapter class.
 |---|---|---|
 | `youtrack/client.py` | `FieldWriter`, `CommentPoster`, `IssueStateLookup`, `ActivityFeed`, `IssueTagsLookup` | httpx async REST client |
 | `git/diff.py` | `GitDiffProvider` | `subprocess.run` wrapper around git CLI |
-| `cli/claude_code.py` | `AgentRunner` (via `ClaudeCodeCliRunner`) | spawns `claude -p` / `claude --bare -p` as subprocess in the action's `cwd`; concurrency-gated by injected `asyncio.Semaphore`; combines stderr+stdout on non-zero exit |
+| `cli/claude_code.py` | `AgentRunner` (via `ClaudeCodeCliRunner`) | spawns `claude -p --output-format json` / `claude --bare -p ...` as subprocess in the action's `cwd`; parses the result envelope (`envelope.py`) for text, tokens and USD cost; concurrency-gated by injected `asyncio.Semaphore`; combines stderr+stdout on non-zero exit |
 | `llm/jinja.py` | `PromptRenderer` | Jinja2 with `StrictUndefined` |
 | `storage/runs.py` | `RunStore` + `IdempotencyStore` | atomic-write JSON files |
 

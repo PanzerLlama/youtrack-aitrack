@@ -1,10 +1,12 @@
 """ClaudeCodeCliRunner — invoke the Claude Code CLI as an AgentRunner backend.
 
-Spawns `claude -p <prompt>` (or `claude --bare -p <prompt>`) as a subprocess
-in the caller's working directory, captures stdout, and surfaces failures as
-AgentRunnerError. Concurrency is gated by an injected asyncio.Semaphore so
-that a daemon polling multiple workflows in parallel does not over-subscribe
-either the user's subscription rate limits or the host's CPU.
+Spawns `claude -p <prompt> --output-format json` (or `claude --bare -p ...`)
+as a subprocess in the caller's working directory, parses the JSON result
+envelope for the answer plus token usage and cost, and surfaces failures as
+AgentRunnerError. Plain-text stdout (older CLI versions) is accepted as-is.
+Concurrency is gated by an injected asyncio.Semaphore so that a daemon
+polling multiple workflows in parallel does not over-subscribe either the
+user's subscription rate limits or the host's CPU.
 
 Two auth modes, both ToS-allowed on the user's own machine (verified
 2026-05-17):
@@ -26,6 +28,7 @@ import os
 import time
 from pathlib import Path
 
+from youtrack_aitrack.adapters.cli.envelope import parse_result_envelope
 from youtrack_aitrack.domain.agent_runner import AgentResult, AgentRunnerError
 
 
@@ -60,7 +63,7 @@ class ClaudeCodeCliRunner:
         args: list[str] = [self._binary]
         if self._bare:
             args.append("--bare")
-        args.extend(["-p", prompt])
+        args.extend(["-p", prompt, "--output-format", "json"])
         if self._allowed_tools is not None:
             args.extend(["--allowedTools", self._allowed_tools])
         if model is not None:
@@ -117,9 +120,25 @@ class ClaudeCodeCliRunner:
                 stderr=combined or None,
             )
 
+        envelope = parse_result_envelope(stdout_text)
+        if envelope is None:
+            return AgentResult(
+                output=stdout_text,
+                exit_code=proc.returncode,
+                duration_s=duration_s,
+                model_used=model,
+            )
+        if envelope.is_error:
+            raise AgentRunnerError(
+                f"Claude Code CLI reported {envelope.subtype or 'an error'}",
+                stderr=envelope.result or stderr_text or None,
+            )
         return AgentResult(
-            output=stdout.decode("utf-8", errors="replace"),
+            output=envelope.result,
             exit_code=proc.returncode,
             duration_s=duration_s,
             model_used=model,
+            input_tokens=envelope.input_tokens,
+            output_tokens=envelope.output_tokens,
+            cost_usd=envelope.total_cost_usd,
         )

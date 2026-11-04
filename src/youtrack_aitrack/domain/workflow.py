@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from typing import Self
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -45,3 +46,36 @@ class Workflow(BaseModel):
                 if a.depends_on:
                     raise ValueError(f"Action {a.id!r} in {group_name} cannot declare depends_on")
         return self
+
+
+def select_actions(workflow: Workflow, action_ids: Iterable[str]) -> Workflow:
+    """Restrict *workflow* to *action_ids* plus their transitive ``depends_on`` closure.
+
+    Dependencies are re-run rather than read from a past run so downstream
+    actions see fresh upstream output. Workflow-level hooks are dropped: a
+    partial run must not flip ``on_success`` / ``on_failure`` fields for the
+    whole workflow. Unknown ids raise ``ValueError`` listing the valid ones.
+    """
+    by_id = {a.id: a for a in workflow.actions}
+    wanted = set(action_ids)
+    unknown = sorted(wanted - by_id.keys())
+    if unknown:
+        raise ValueError(
+            f"workflow {workflow.name!r} has no action(s) {unknown}; "
+            f"available: {[a.id for a in workflow.actions]}"
+        )
+    selected: set[str] = set()
+    stack = list(wanted)
+    while stack:
+        aid = stack.pop()
+        if aid in selected:
+            continue
+        selected.add(aid)
+        stack.extend(by_id[aid].depends_on)
+    return workflow.model_copy(
+        update={
+            "actions": [a for a in workflow.actions if a.id in selected],
+            "on_success": [],
+            "on_failure": [],
+        }
+    )

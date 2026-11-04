@@ -8,6 +8,8 @@ file before upgrading.
 
 ## [Unreleased]
 
+## [0.4.0b0] — 2026-11-04
+
 Iterating on a single report is now cheap and visible: re-run one action
 instead of the whole workflow, see what it cost, and see which repo and
 branch the run actually inspected.
@@ -282,7 +284,8 @@ verified end-to-end against YouTrack Cloud 2026.1.
 - v1 of `--stub-llm` and `--dry-run` are opt-in. A fresh `yta run` with
   no flags hits Anthropic and writes to YouTrack.
 
-[Unreleased]: https://github.com/PanzerLlama/youtrack-aitrack/compare/v0.3.0b0...HEAD
+[Unreleased]: https://github.com/PanzerLlama/youtrack-aitrack/compare/v0.4.0b0...HEAD
+[0.4.0b0]: https://github.com/PanzerLlama/youtrack-aitrack/compare/v0.3.0b0...v0.4.0b0
 [0.3.0b0]: https://github.com/PanzerLlama/youtrack-aitrack/compare/v0.2.0b0...v0.3.0b0
 [0.2.0b0]: https://github.com/PanzerLlama/youtrack-aitrack/compare/v0.1.0b0...v0.2.0b0
 [0.1.0b0]: https://github.com/PanzerLlama/youtrack-aitrack/releases/tag/v0.1.0b0

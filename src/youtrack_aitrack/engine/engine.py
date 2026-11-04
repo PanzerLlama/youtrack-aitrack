@@ -170,6 +170,9 @@ class WorkflowEngine:
             state=RunState.FAILED if failed else RunState.DONE,
             action_results=list(outputs.values()),
             hook_results=hook_results,
+            repo_dir=repo_path,
+            branch=branch,
+            commit_sha=commit_sha,
         )
 
 

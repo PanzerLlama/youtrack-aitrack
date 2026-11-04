@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import Any, Literal, cast
 
 from pydantic import PrivateAttr
@@ -821,3 +822,27 @@ async def test_dispatch_force_emits_no_already_dispatched_skip() -> None:
 
     assert len(forced) == 1
     assert seen == []
+
+
+async def test_report_carries_resolved_repo_state() -> None:
+    wf = _wf(actions=[_FakeAction(id="a")])
+
+    [report] = await WorkflowEngine().dispatch(
+        _manual_event(),
+        [wf],
+        repo_path=Path("/work/repo"),
+        branch="DEMO-1-feature",
+        commit_sha="abc123",
+    )
+
+    assert report.repo_dir == Path("/work/repo")
+    assert report.branch == "DEMO-1-feature"
+    assert report.commit_sha == "abc123"
+
+
+async def test_report_repo_state_defaults_to_none() -> None:
+    wf = _wf(actions=[_FakeAction(id="a")])
+
+    [report] = await WorkflowEngine().dispatch(_manual_event(), [wf])
+
+    assert (report.repo_dir, report.branch, report.commit_sha) == (None, None, None)

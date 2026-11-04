@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from enum import StrEnum
+from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
@@ -34,5 +35,9 @@ class RunReport(BaseModel):
     state: RunState
     action_results: list[ActionResult] = Field(default_factory=list)
     hook_results: list[ActionResult] = Field(default_factory=list)
+    # Resolved repo state the run operated on; None when unknown (older stored runs).
+    repo_dir: Path | None = None
+    branch: str | None = None
+    commit_sha: str | None = None
 
     model_config = ConfigDict(frozen=True)

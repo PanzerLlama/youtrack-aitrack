@@ -61,17 +61,20 @@ class GitBranchAction(ActionSpec):
 
     _git: BranchCreator = PrivateAttr()
     _default_base: str = PrivateAttr()
+    _dry_run: bool = PrivateAttr()
 
     def __init__(
         self,
         *,
         git: BranchCreator | None = None,
         default_base: str = "main",
+        dry_run: bool = False,
         **data: Any,
     ) -> None:
         super().__init__(**data)
         self._git = git if git is not None else _NoOpBranchCreator()
         self._default_base = default_base
+        self._dry_run = dry_run
 
     async def execute(self, ctx: Context) -> ActionResult:
         repo = ctx.repo_path if ctx.repo_path is not None else Path(".")
@@ -103,7 +106,13 @@ class GitBranchAction(ActionSpec):
                 "created": not exists,
                 "base": base,
                 "checked_out": self.checkout,
-                "note": _note(branch, created=not exists, base=base, checkout=self.checkout),
+                "note": _note(
+                    branch,
+                    created=not exists,
+                    base=base,
+                    checkout=self.checkout,
+                    dry_run=self._dry_run,
+                ),
             },
         )
 
@@ -111,6 +120,9 @@ class GitBranchAction(ActionSpec):
         return self.checkout and self._git.current_branch(repo) != branch
 
 
-def _note(branch: str, *, created: bool, base: str, checkout: bool) -> str:
+def _note(branch: str, *, created: bool, base: str, checkout: bool, dry_run: bool) -> str:
+    if dry_run:
+        verb = f"would create {branch} from {base}" if created else f"would reuse {branch}"
+        return "[dry-run] " + (f"{verb}; would switch to it" if checkout else verb)
     verb = f"created {branch} from {base}" if created else f"reused existing {branch}"
     return f"{verb}; switched to it" if checkout else verb

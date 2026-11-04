@@ -131,3 +131,22 @@ async def test_rejects_paths_escaping_repo(bad: str) -> None:
 async def test_default_noop_writer_succeeds_without_io() -> None:
     result = await WriteFileAction(id="save", source="plan", path="x.md").execute(_ctx())
     assert result.success is True
+
+
+@pytest.mark.asyncio
+async def test_dry_run_note_says_would_write_and_commit() -> None:
+    w = _FakeWriter()
+    action = WriteFileAction(
+        id="save",
+        source="plan",
+        path="docs/{task_id}.md",
+        commit_message="plan",
+        writer=w,
+        dry_run=True,
+    )
+
+    result = await action.execute(_ctx())
+
+    assert result.success is True
+    assert result.output is not None
+    assert result.output["note"] == "[dry-run] would write docs/PROJ-12.md; would commit it"

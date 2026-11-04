@@ -41,10 +41,14 @@ class WriteFileAction(ActionSpec):
     commit_message: str | None = None
 
     _writer: RepoFileWriter = PrivateAttr()
+    _dry_run: bool = PrivateAttr()
 
-    def __init__(self, *, writer: RepoFileWriter | None = None, **data: Any) -> None:
+    def __init__(
+        self, *, writer: RepoFileWriter | None = None, dry_run: bool = False, **data: Any
+    ) -> None:
         super().__init__(**data)
         self._writer = writer if writer is not None else NoOpRepoFileWriter()
+        self._dry_run = dry_run
 
     async def execute(self, ctx: Context) -> ActionResult:
         text = _source_text(ctx, self.source)
@@ -65,7 +69,9 @@ class WriteFileAction(ActionSpec):
         if self.commit_message is not None:
             message = self.commit_message.replace("{task_id}", task_id)
             sha = self._writer.commit_paths(repo, [rel], message)
-        note = f"wrote {rel}" + (f"; committed {sha[:10]}" if sha else "")
+        note = dry_run_prefix(self._dry_run) + file_note(
+            rel, sha, commit=self.commit_message is not None, dry_run=self._dry_run
+        )
         return ActionResult(
             action_id=self.id,
             success=True,
@@ -79,6 +85,16 @@ def _source_text(ctx: Context, source: str) -> str | None:
         return None
     text = result.output.get("text")
     return text if isinstance(text, str) else None
+
+
+def dry_run_prefix(dry_run: bool) -> str:
+    return "[dry-run] " if dry_run else ""
+
+
+def file_note(rel: PurePosixPath, sha: str | None, *, commit: bool, dry_run: bool) -> str:
+    if dry_run:
+        return f"would write {rel}" + ("; would commit it" if commit else "")
+    return f"wrote {rel}" + (f"; committed {sha[:10]}" if sha else "")
 
 
 def safe_relative_path(raw: str) -> PurePosixPath:

@@ -192,3 +192,35 @@ async def test_fails_when_source_has_no_text() -> None:
 async def test_default_noop_tracker_skips() -> None:
     result = await BdIssueAction(id="track", source="plan").execute(_ctx())
     assert result.skipped is True
+
+
+@pytest.mark.asyncio
+async def test_dry_run_note_says_would_create_beads_issue() -> None:
+    action = BdIssueAction(id="track", source="plan", tracker=_FakeTracker(), dry_run=True)
+
+    result = await action.execute(_ctx())
+
+    assert result.success is True
+    assert result.output is not None
+    assert result.output["note"] == "[dry-run] would create beads issue"
+    assert "would be tracked" in result.output["text"]
+
+
+@pytest.mark.asyncio
+async def test_dry_run_fallback_note_says_would_write() -> None:
+    action = BdIssueAction(
+        id="track",
+        source="plan",
+        tracker=_FakeTracker(available=False),
+        writer=_FakeWriter(),
+        fallback_path="docs/{task_id}.md",
+        fallback_commit_message="plan",
+        dry_run=True,
+    )
+
+    result = await action.execute(_ctx())
+
+    assert result.output is not None
+    assert result.output["note"] == (
+        "[dry-run] beads unavailable; would write docs/PROJ-12.md; would commit it"
+    )

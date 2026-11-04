@@ -192,3 +192,28 @@ async def test_explicit_base_wins_over_default_base() -> None:
     await action.execute(_ctx())
 
     assert git.created == [("PROJ-12-add-csv-export", "release")]
+
+
+@pytest.mark.asyncio
+async def test_dry_run_note_says_would_create_not_created() -> None:
+    git = _FakeGit()
+    action = GitBranchAction(id="b", base="develop", git=git, dry_run=True)
+
+    result = await action.execute(_ctx())
+
+    assert result.success is True
+    assert result.output is not None
+    assert result.output["note"] == (
+        "[dry-run] would create PROJ-12-add-csv-export from develop; would switch to it"
+    )
+
+
+@pytest.mark.asyncio
+async def test_dry_run_note_says_would_reuse_existing_branch() -> None:
+    git = _FakeGit(branches={"main", "PROJ-12-add-csv-export"})
+    action = GitBranchAction(id="b", git=git, checkout=False, dry_run=True)
+
+    result = await action.execute(_ctx())
+
+    assert result.output is not None
+    assert result.output["note"] == "[dry-run] would reuse PROJ-12-add-csv-export"

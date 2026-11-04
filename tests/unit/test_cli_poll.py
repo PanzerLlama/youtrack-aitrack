@@ -165,3 +165,24 @@ def test_poll_missing_config_errors(tmp_path: Path) -> None:
     cfg.mkdir()
     result = runner.invoke(app, ["--config-dir", str(cfg), "poll"])
     assert result.exit_code != 0
+
+
+UNKNOWN_ACTION_WORKFLOW = """\
+name: future
+trigger:
+  type: status_change
+  to_state: "Ready for testing"
+actions:
+  - id: nope
+    type: action_from_a_newer_release
+"""
+
+
+def test_poll_workflow_parse_error_is_one_line_not_traceback(tmp_path: Path) -> None:
+    cfg = _make_config(tmp_path)
+    _write_workflow(cfg, "future.yaml", UNKNOWN_ACTION_WORKFLOW)
+    result = runner.invoke(app, ["--config-dir", str(cfg), "poll"])
+    assert result.exit_code != 0
+    assert "future.yaml" in result.output
+    assert "action_from_a_newer_release" in result.output
+    assert "Traceback" not in result.output

@@ -30,6 +30,7 @@ Both `yta run` and `yta poll` accept these flags. Combine freely.
 | `--workflow=NAME` | yes | yes | yes | run exactly one workflow by name, **bypassing trigger matching** — the only way to fire a `trigger: manual` workflow (`yta run` only) |
 | `--repo-dir=PATH` | n/a | n/a | n/a | override the git repo root (default: current working directory) |
 | `--show-output` | n/a | n/a | n/a | print each action's text output after the summary table (`yta run` only) |
+| `--action=ID` | yes | yes | yes | re-run only this action (repeatable) plus its `depends_on` chain; workflow `on_success`/`on_failure` hooks are skipped. Requires `--workflow`; combine with `--force` to redo a report after a code change (`yta run` only) |
 
 Workflows that use `git_branch` / `write_file` change your working tree
 (new branch, checkout, a committed file). `--dry-run` also disables those

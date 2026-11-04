@@ -255,6 +255,7 @@ yta workflows validate                            # check every YAML parses
 yta run <issue-id>                                # manual dispatch
 yta run <issue-id> --dry-run --stub-llm --force  # safe rerun, no spend
 yta run <issue-id> --workflow=plan-implementation # fire a manual workflow by name
+yta run <issue-id> --workflow=<name> --action=qa_plan --force  # redo one report (+ its deps)
 yta poll                                          # one-shot pull from the activity feed
 yta poll --daemon                                 # continuous loop
 ```

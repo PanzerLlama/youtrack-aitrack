@@ -623,3 +623,121 @@ def test_run_workflow_parse_error_is_one_line_not_traceback(tmp_path: Path) -> N
     assert "future.yaml" in result.output
     assert "action_from_a_newer_release" in result.output
     assert "Traceback" not in result.output
+
+
+TWO_REPORTS_WORKFLOW = """\
+name: two-reports
+trigger:
+  type: status_change
+  to_state: "Ready for testing"
+actions:
+  - id: pages
+    type: ai_report
+    output: { kind: custom_field, name: "Pages Changed" }
+    prompt: smoke.md
+    model: claude-sonnet-4-6
+  - id: qa
+    type: ai_report
+    depends_on: [pages]
+    output: { kind: custom_field, name: "QA Plan" }
+    prompt: smoke.md
+    model: claude-sonnet-4-6
+  - id: audit
+    type: ai_report
+    output: { kind: custom_field, name: "Security Audit" }
+    prompt: smoke.md
+    model: claude-sonnet-4-6
+on_success:
+  - id: done
+    type: set_field
+    fields:
+      Status: "audited"
+"""
+
+
+def _mock_text_fields(respx_mock: respx.MockRouter, *names: str) -> None:
+    respx_mock.get(f"/api/admin/projects/{PROJECT}/customFields").mock(
+        return_value=httpx.Response(
+            200,
+            json=[
+                {"id": f"PF-{i}", "$type": "TextProjectCustomField", "field": {"name": n}}
+                for i, n in enumerate(names, start=1)
+            ]
+            + [{"id": "PF-S", "$type": "SimpleProjectCustomField", "field": {"name": "Status"}}],
+        )
+    )
+
+
+@respx.mock(base_url=BASE_URL, assert_all_called=False)
+def test_run_action_runs_only_selected_and_its_dependency(
+    respx_mock: respx.MockRouter, tmp_path: Path
+) -> None:
+    cfg = _make_config(tmp_path)
+    _write_workflow(cfg, "two.yaml", TWO_REPORTS_WORKFLOW)
+    _write_prompt(cfg, "smoke.md", SMOKE_PROMPT)
+    _mock_state(respx_mock, "DEMO-1", "Ready for testing")
+    _mock_text_fields(respx_mock, "Pages Changed", "QA Plan", "Security Audit")
+    write_route = respx_mock.post("/api/issues/DEMO-1").mock(
+        return_value=httpx.Response(200, json={"id": "DEMO-1"})
+    )
+
+    result = runner.invoke(
+        app,
+        [
+            "--config-dir",
+            str(cfg),
+            "run",
+            "DEMO-1",
+            "--workflow",
+            "two-reports",
+            "--action",
+            "qa",
+            "--stub-llm",
+            "--force",
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    rows = [line.split() for line in result.output.splitlines() if line.startswith("two-reports")]
+    assert [row[1] for row in rows] == ["pages", "qa"]
+    assert "done (hook)" not in result.output
+    bodies = [c.request.read().decode() for c in write_route.calls]
+    assert len(bodies) == 2
+    assert all('"id":"PF-S"' not in b for b in bodies)
+
+
+def test_run_action_requires_workflow(tmp_path: Path) -> None:
+    cfg = _make_config(tmp_path)
+    _write_workflow(cfg, "two.yaml", TWO_REPORTS_WORKFLOW)
+    result = runner.invoke(app, ["--config-dir", str(cfg), "run", "DEMO-1", "--action", "qa"])
+    assert result.exit_code != 0
+    assert "--action requires --workflow" in result.output
+
+
+@respx.mock(base_url=BASE_URL, assert_all_called=False)
+def test_run_unknown_action_id_lists_available_ids(
+    respx_mock: respx.MockRouter, tmp_path: Path
+) -> None:
+    cfg = _make_config(tmp_path)
+    _write_workflow(cfg, "two.yaml", TWO_REPORTS_WORKFLOW)
+    _write_prompt(cfg, "smoke.md", SMOKE_PROMPT)
+    state_route = _mock_state(respx_mock, "DEMO-1", "Ready for testing")
+
+    result = runner.invoke(
+        app,
+        [
+            "--config-dir",
+            str(cfg),
+            "run",
+            "DEMO-1",
+            "--workflow",
+            "two-reports",
+            "--action",
+            "nope",
+        ],
+    )
+
+    assert result.exit_code != 0
+    assert "['nope']" in result.output
+    assert "'pages', 'qa', 'audit'" in result.output
+    assert not state_route.called

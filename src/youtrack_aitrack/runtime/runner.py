@@ -25,7 +25,7 @@ from youtrack_aitrack.domain.inputs import GitDiffProvider
 from youtrack_aitrack.domain.issue import IssueDetails
 from youtrack_aitrack.domain.progress import ProgressCallback, SkipCallback
 from youtrack_aitrack.domain.run import RunReport
-from youtrack_aitrack.domain.workflow import Workflow
+from youtrack_aitrack.domain.workflow import Workflow, select_actions
 from youtrack_aitrack.engine import WorkflowEngine
 from youtrack_aitrack.engine.idempotency import IdempotencyStore
 from youtrack_aitrack.engine.run_store import RunStore
@@ -106,9 +106,19 @@ class Runner:
         *,
         force: bool = False,
         match_triggers: bool = True,
+        action_ids: set[str] | None = None,
         on_progress: ProgressCallback | None = None,
         on_skipped: SkipCallback | None = None,
     ) -> list[RunReport]:
+        """Dispatch for *issue_id*; ``action_ids`` narrows every loaded workflow to those
+        actions plus their depends_on closure and drops workflow hooks (see
+        ``select_actions``). Unknown ids raise ``ValueError`` before any I/O.
+        """
+        workflows = (
+            [select_actions(w, action_ids) for w in self._workflows]
+            if action_ids is not None
+            else self._workflows
+        )
         details = await self._details.get_issue_details(issue_id)
         event = IssueEvent(
             issue_id=issue_id,
@@ -124,6 +134,7 @@ class Runner:
             {},
             force=force,
             match_triggers=match_triggers,
+            workflows=workflows,
             on_progress=on_progress,
             on_skipped=on_skipped,
         )
@@ -137,12 +148,13 @@ class Runner:
         force: bool,
         on_progress: ProgressCallback | None,
         match_triggers: bool = True,
+        workflows: list[Workflow] | None = None,
         on_skipped: SkipCallback | None = None,
     ) -> list[RunReport]:
         branch, diff, commit_sha, no_diff = self._resolve_repo_state(event.issue_id)
         reports = await self._engine.dispatch(
             event,
-            self._workflows,
+            workflows if workflows is not None else self._workflows,
             unavailable_inputs={**unavailable, **no_diff},
             commit_sha=commit_sha,
             branch=branch,

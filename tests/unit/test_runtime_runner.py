@@ -642,3 +642,54 @@ async def test_dispatch_marks_task_meta_unavailable_when_issue_fetch_fails() -> 
     assert result.skip_reason is not None
     assert "task_meta" in result.skip_reason
     assert "issue fetch failed" in result.skip_reason
+
+
+def _chain_with_hooks() -> Workflow:
+    return Workflow(
+        name="chain",
+        trigger=ManualTrigger(),
+        actions=[
+            AiReportAction(id="parent", inputs=["git_diff"], prompt="p.md", model="m"),
+            AiReportAction(id="child", depends_on=["parent"], prompt="p.md", model="m"),
+            AiReportAction(id="other", prompt="p.md", model="m"),
+        ],
+        on_success=[SetFieldAction(id="done", fields={"Audit Status": "done"})],
+    )
+
+
+async def test_run_action_ids_runs_closure_only_and_skips_hooks() -> None:
+    runner, llm, writer, _, _ = _build(
+        git=_FakeGit(), workflow=_chain_with_hooks(), state_lookup=_FakeStateLookup()
+    )
+
+    [report] = await runner.run("DEMO-1", match_triggers=False, action_ids={"child"})
+
+    assert report.state is RunState.DONE
+    assert {r.action_id for r in report.action_results} == {"parent", "child"}
+    assert len(llm.calls) == 2
+    assert report.hook_results == []
+    assert writer.calls == []
+
+
+async def test_run_unknown_action_id_raises_before_any_dispatch() -> None:
+    runner, llm, _, run_store, _ = _build(
+        git=_FakeGit(), workflow=_chain_with_hooks(), state_lookup=_FakeStateLookup()
+    )
+
+    with pytest.raises(ValueError, match="no action"):
+        await runner.run("DEMO-1", match_triggers=False, action_ids={"nope"})
+
+    assert llm.calls == []
+    assert run_store.saved == []
+
+
+async def test_run_without_action_ids_runs_everything_and_hooks() -> None:
+    runner, llm, writer, _, _ = _build(
+        git=_FakeGit(), workflow=_chain_with_hooks(), state_lookup=_FakeStateLookup()
+    )
+
+    [report] = await runner.run("DEMO-1", match_triggers=False)
+
+    assert len(llm.calls) == 3
+    assert [h.action_id for h in report.hook_results] == ["done"]
+    assert len(writer.calls) == 1

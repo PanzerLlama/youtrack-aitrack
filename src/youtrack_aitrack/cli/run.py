@@ -47,6 +47,14 @@ _STUB_LLM_OPTION = typer.Option(
 _SHOW_OUTPUT_OPTION = typer.Option(
     False, "--show-output", help="Print each action's text output after the summary table."
 )
+_ACTION_OPTION = typer.Option(
+    None,
+    "--action",
+    help=(
+        "Run only this action id (repeatable) plus its depends_on chain; "
+        "workflow on_success/on_failure hooks are skipped. Requires --workflow."
+    ),
+)
 
 
 def run_command(
@@ -58,12 +66,15 @@ def run_command(
     repo_dir: Path | None = _REPO_DIR_OPTION,
     stub_llm: bool = _STUB_LLM_OPTION,
     show_output: bool = _SHOW_OUTPUT_OPTION,
+    action: list[str] | None = _ACTION_OPTION,
 ) -> None:
     """Dispatch workflows for ISSUE_ID matching its current state."""
     if not _ISSUE_ID_RE.match(issue_id):
         raise typer.BadParameter(
             f"invalid issue id {issue_id!r}; expected <PROJECT>-<NUMBER>, e.g. DEMO-42"
         )
+    if action and workflow is None:
+        raise typer.BadParameter("--action requires --workflow to name the workflow it belongs to")
     config_dir: Path = ctx.obj["config_dir"]
     config_yaml = config_dir / "config.yaml"
     if not config_yaml.is_file():
@@ -85,9 +96,17 @@ def run_command(
     except WorkflowParseError as exc:
         raise typer.BadParameter(str(exc)) from exc
     skipped: list[WorkflowSkipped] = []
-    reports = _dispatch(
-        runner, issue_id, force=force, match_triggers=workflow is None, on_skipped=skipped.append
-    )
+    try:
+        reports = _dispatch(
+            runner,
+            issue_id,
+            force=force,
+            match_triggers=workflow is None,
+            action_ids=set(action) if action else None,
+            on_skipped=skipped.append,
+        )
+    except ValueError as exc:  # unknown --action id, raised before any I/O
+        raise typer.BadParameter(str(exc)) from exc
     _print_summary(reports, skipped, issue_id=issue_id)
     if show_output:
         _print_outputs(reports)
@@ -101,6 +120,7 @@ def _dispatch(
     *,
     force: bool,
     match_triggers: bool,
+    action_ids: set[str] | None,
     on_skipped: Callable[[WorkflowSkipped], None],
 ) -> list[RunReport]:
     """Run the workflows, showing a live progress region on an interactive TTY.
@@ -110,11 +130,22 @@ def _dispatch(
     """
     if not sys.stdout.isatty():
         return asyncio.run(
-            runner.run(issue_id, force=force, match_triggers=match_triggers, on_skipped=on_skipped)
+            runner.run(
+                issue_id,
+                force=force,
+                match_triggers=match_triggers,
+                action_ids=action_ids,
+                on_skipped=on_skipped,
+            )
         )
     return asyncio.run(
         _dispatch_live(
-            runner, issue_id, force=force, match_triggers=match_triggers, on_skipped=on_skipped
+            runner,
+            issue_id,
+            force=force,
+            match_triggers=match_triggers,
+            action_ids=action_ids,
+            on_skipped=on_skipped,
         )
     )
 
@@ -125,6 +156,7 @@ async def _dispatch_live(
     *,
     force: bool,
     match_triggers: bool,
+    action_ids: set[str] | None,
     on_skipped: Callable[[WorkflowSkipped], None],
 ) -> list[RunReport]:
     """Drive a rich Live region from the asyncio loop itself.
@@ -147,6 +179,7 @@ async def _dispatch_live(
                 issue_id,
                 force=force,
                 match_triggers=match_triggers,
+                action_ids=action_ids,
                 on_progress=display.handle,
                 on_skipped=on_skipped,
             )

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 import httpx
@@ -15,6 +16,14 @@ from youtrack_aitrack.cli.main import app
 from youtrack_aitrack.domain.event import STATE_FIELD_NAME
 
 runner = CliRunner()
+
+_ANSI = re.compile(r"\x1b\[[0-9;]*m")
+
+
+def _plain(output: str) -> str:
+    """Rich styles option names inside error panels on CI; compare without escapes."""
+    return _ANSI.sub("", output)
+
 
 BASE_URL = "https://yt.example.com"
 PROJECT = "DEMO"
@@ -711,7 +720,7 @@ def test_run_action_requires_workflow(tmp_path: Path) -> None:
     _write_workflow(cfg, "two.yaml", TWO_REPORTS_WORKFLOW)
     result = runner.invoke(app, ["--config-dir", str(cfg), "run", "DEMO-1", "--action", "qa"])
     assert result.exit_code != 0
-    assert "--action requires --workflow" in result.output
+    assert "--action requires --workflow" in _plain(result.output)
 
 
 @respx.mock(base_url=BASE_URL, assert_all_called=False)
@@ -738,6 +747,6 @@ def test_run_unknown_action_id_lists_available_ids(
     )
 
     assert result.exit_code != 0
-    assert "['nope']" in result.output
-    assert "'pages', 'qa', 'audit'" in result.output
+    assert "['nope']" in _plain(result.output)
+    assert "'pages', 'qa', 'audit'" in _plain(result.output)
     assert not state_route.called

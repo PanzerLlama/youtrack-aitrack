@@ -213,3 +213,64 @@ async def test_default_mode_omits_permission_mode_flag(
     runner = ClaudeCodeCliRunner(asyncio.Semaphore(1), binary=str(fake_echo_args))
     result = await runner.run("audit", cwd=tmp_path, commit_sha=None, timeout_s=5.0)
     assert "--permission-mode" not in result.output.splitlines()
+
+
+# Trimmed from a real `claude -p --output-format json` run (Claude Code 2.1.318).
+_ENVELOPE = (
+    '{"type":"result","subtype":"success","is_error":false,"duration_ms":1258,'
+    '"num_turns":1,"result":"## Findings\\nNo issues.","total_cost_usd":0.00237653,'
+    '"usage":{"input_tokens":2,"cache_creation_input_tokens":11278,'
+    '"cache_read_input_tokens":11873,"output_tokens":4,'
+    '"server_tool_use":{"web_search_requests":0}},"modelUsage":{},"session_id":"s"}'
+)
+_ERROR_ENVELOPE = (
+    '{"type":"result","subtype":"error_max_turns","is_error":true,'
+    '"result":"Reached max turns","usage":{"output_tokens":9},"total_cost_usd":0.5}'
+)
+
+
+@pytest.fixture
+def fake_json(tmp_path: Path) -> Path:
+    return _write_fake_binary(tmp_path / "fake-claude-json", f"cat <<'EOF'\n{_ENVELOPE}\nEOF")
+
+
+@pytest.fixture
+def fake_json_error(tmp_path: Path) -> Path:
+    return _write_fake_binary(
+        tmp_path / "fake-claude-json-error", f"cat <<'EOF'\n{_ERROR_ENVELOPE}\nEOF"
+    )
+
+
+async def test_json_envelope_yields_result_text_tokens_and_cost(
+    fake_json: Path, tmp_path: Path
+) -> None:
+    runner = ClaudeCodeCliRunner(asyncio.Semaphore(1), binary=str(fake_json))
+    result = await runner.run("p", cwd=tmp_path, commit_sha=None, timeout_s=5.0)
+    assert result.output == "## Findings\nNo issues."
+    assert result.input_tokens == 2 + 11278 + 11873
+    assert result.output_tokens == 4
+    assert result.cost_usd == 0.00237653
+
+
+async def test_error_envelope_with_zero_exit_raises(fake_json_error: Path, tmp_path: Path) -> None:
+    runner = ClaudeCodeCliRunner(asyncio.Semaphore(1), binary=str(fake_json_error))
+    with pytest.raises(AgentRunnerError) as exc:
+        await runner.run("p", cwd=tmp_path, commit_sha=None, timeout_s=5.0)
+    assert "error_max_turns" in str(exc.value)
+    assert exc.value.stderr == "Reached max turns"
+
+
+async def test_plain_text_stdout_passes_through_without_usage(
+    fake_success: Path, tmp_path: Path
+) -> None:
+    runner = ClaudeCodeCliRunner(asyncio.Semaphore(1), binary=str(fake_success))
+    result = await runner.run("p", cwd=tmp_path, commit_sha=None, timeout_s=5.0)
+    assert "No issues." in result.output
+    assert (result.input_tokens, result.output_tokens, result.cost_usd) == (None, None, None)
+
+
+async def test_output_format_json_flag_follows_prompt(fake_echo_args: Path, tmp_path: Path) -> None:
+    runner = ClaudeCodeCliRunner(asyncio.Semaphore(1), binary=str(fake_echo_args))
+    result = await runner.run("p", cwd=tmp_path, commit_sha=None, timeout_s=5.0)
+    lines = result.output.strip().splitlines()
+    assert lines[lines.index("--output-format") + 1] == "json"
